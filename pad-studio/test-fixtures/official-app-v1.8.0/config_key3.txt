@@ -1,0 +1,8 @@
+Alias=Probe3
+HidMode=True
+ACT d UP
+UP
+ACT d F5
+F5
+ACT 9 MOUSE_WHEEL 3
+MOUSE_WHEEL 3

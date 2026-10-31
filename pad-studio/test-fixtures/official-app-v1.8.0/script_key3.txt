@@ -1,0 +1,3 @@
+UP
+F5
+MOUSE_WHEEL 3

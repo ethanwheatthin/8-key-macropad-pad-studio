@@ -1,0 +1,20 @@
+WINDOWS r
+Delay 200
+STRING https://www.probe-web.test
+Delay 200
+ENTER
+WINDOWS
+Delay 20
+STRING notepad.exe
+ENTER
+WINDOWS r
+Delay 100
+STRING C:\Users\Public
+ENTER
+WINDOWS r
+Delay 100
+STRING C:\Users\Public\probe.txt
+ENTER
+STRING probe text
+ENTER
+CONTROL p

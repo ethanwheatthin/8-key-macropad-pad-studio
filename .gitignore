@@ -1,0 +1,8 @@
+3rd-party -integrations/hardware-monitor/build/
+
+# Pad Studio: personal backups of the pad drive (contain your own key configs and paths), logs
+pad-studio/pad-backup-*/
+pad-studio/*.log
+
+# 60 MB vendor binary: download it from https://github.com/eezbotfun/8-key-macropad/releases instead of re-hosting it
+eezbotfun_config.exe

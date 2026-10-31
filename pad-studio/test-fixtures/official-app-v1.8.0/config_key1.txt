@@ -1,0 +1,26 @@
+Alias=
+HidMode=False
+ACT 1 www.probe-web.test
+WINDOWS r
+Delay 100
+STRING www.probe-web.test
+ENTER
+ACT 2 C:\Windows\System32\notepad.exe
+WINDOWS
+Delay 20
+STRING notepad.exe
+ENTER
+ACT 3 C:\Users\Public
+WINDOWS r
+Delay 100
+STRING C:\Users\Public
+ENTER
+ACT f C:\Users\Public\probe.txt
+WINDOWS r
+Delay 100
+STRING C:\Users\Public\probe.txt
+ENTER
+ACT 4 probe text ENTER
+STRING probe text
+ENTER
+ACT 5 CONTROL p

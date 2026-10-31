@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pad Studio</title>
+<style>
+  :root { --bg:#0e1015; --card:#171a22; --line:#262b38; --text:#e7eaf2; --dim:#8a93a8; --accent:#7c9cff; --ok:#4cd49a; --warn:#ffb454; --bad:#ff6b7a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,Segoe UI,sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); }
+  h1 { font-size:17px; margin:0 8px 0 0; }
+  h2 { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:18px 0 8px; }
+  .wrap { max-width:1000px; margin:0 auto; padding:14px 16px 8px; }
+  button, select, input, textarea { font:inherit; color:var(--text); background:#0f1219; border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+  button { cursor:pointer; } button:hover:not(:disabled) { border-color:var(--accent); } button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--accent); color:#0b1020; border-color:var(--accent); font-weight:600; }
+  button.on { background:#243055; border-color:var(--accent); }
+  textarea { width:100%; min-height:90px; font-family:ui-monospace,Consolas,monospace; resize:vertical; } input[type=text], input[type=number], input[type=datetime-local], select { width:100%; }
+  .pill { padding:3px 10px; border-radius:99px; border:1px solid var(--line); color:var(--dim); font-size:12px; }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.warn { color:var(--warn); border-color:var(--warn); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; } .grow { flex:1; min-width:140px; }
+  nav button { padding:8px 18px; font-weight:600; } .spacer { flex:1; }
+  .keys { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:10px 0; }
+  .key { height:112px; padding:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; font-size:12px; overflow:hidden; background:var(--card); }
+  .key.flash { background:#2a3d78; transform:scale(.97); transition:all .15s; }
+  .key.sel { border-color:var(--accent); box-shadow:0 0 0 2px #7c9cff55; } .key.dirty::after { content:'●'; color:var(--warn); position:absolute; margin:-92px -60px 0 0; font-size:10px; }
+  .key img { width:48px; height:48px; border-radius:8px; background:#0b0d12; } .key .noimg { width:48px; height:48px; border-radius:8px; border:1px dashed var(--line); }
+  .key span { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:8px; }
+  .pre { padding:10px 6px; display:flex; flex-direction:column; align-items:center; gap:4px; background:var(--card); } .pre b { font-size:24px; font-weight:400; } .pre span { font-size:12px; text-align:center; }
+  .chip.on { background:var(--accent); color:#0b1020; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  #screen { width:100%; max-width:640px; aspect-ratio:480/200; background:#000; border:1px solid var(--line); border-radius:8px; display:block; }
+  .stats { color:var(--dim); font-size:12px; } label.f { display:block; color:var(--dim); font-size:12px; margin:10px 0 4px; }
+  #log { max-width:1000px; margin:8px auto 16px; height:110px; overflow:auto; background:#0b0d12; border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:12px ui-monospace,Consolas,monospace; color:var(--dim); white-space:pre-wrap; }
+  .bad { color:var(--bad); } .good { color:var(--ok); } details { margin-top:14px; } summary { color:var(--dim); cursor:pointer; }
+  [hidden] { display:none !important; }
+  .palette { display:grid; grid-template-columns:1fr 1fr; gap:6px; min-width:270px; } .palette button { text-align:left; }
+  .arow { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:6px; border:1px solid var(--line); border-radius:8px; margin:4px 0; background:#0f1219; }
+  .arow .nm { min-width:140px; font-weight:600; } .arow input[type=text], .arow input[type=number], .arow select { width:auto; min-width:90px; flex:1; } .arow label { font-size:12px; color:var(--dim); }
+  .drop { outline:2px dashed var(--accent); }
+  table.dev { border-collapse:collapse; width:100%; } table.dev td, table.dev th { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); font-weight:normal; } table.dev th { color:var(--dim); font-size:12px; }
+  a { color:var(--accent); }
+  :root[data-theme="light"] { --bg:#f4f6fb; --card:#ffffff; --line:#d6dbe7; --text:#1b2030; --dim:#5b6479; --accent:#3a63e8; }
+  :root[data-theme="light"] button, :root[data-theme="light"] select, :root[data-theme="light"] input, :root[data-theme="light"] textarea, :root[data-theme="light"] .arow, :root[data-theme="light"] #log { background:#fff; color:var(--text); }
+  :root[data-theme="light"] button.primary, :root[data-theme="light"] .chip.on, :root[data-theme="light"] button.on { background:var(--accent); color:#fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pad Studio</h1>
+  <nav class="row" style="margin:0"><button id="navKeys" class="on">Keys</button><button id="navScreen">Screen</button><button id="navExcel">Excel</button><button id="navDevice">Device</button></nav><button id="btnTheme" title="Switch light / dark theme">◐</button>
+  <span class="spacer"></span>
+  <button id="btnSerial" class="primary">Connect pad</button>
+  <button id="btnDisc" hidden>Disconnect</button>
+  <span class="pill" id="pConn">screen not connected</span>
+  <span class="pill" id="pDrive">pad drive: checking…</span>
+</header>
+
+<!-- ============ KEYS ============ -->
+<div class="wrap" id="pageKeys">
+  <div class="row" id="tabs"></div>
+  <div class="row">
+    <span>Start from a layout:</span><select id="layoutSel" style="width:auto"></select><button id="btnLayout">Apply to this profile</button>
+    <span class="spacer"></span><button id="btnReload">Undo / reload from pad</button>
+  </div>
+  <div class="keys" id="keys"></div>
+  <div class="row"><span id="selTitle" class="grow"></span></div>
+
+  <h2>1 · Click a key above   2 · Pick what it does</h2>
+  <div class="row"><input type="text" id="search" placeholder="Search presets…" class="grow"><span id="chips" class="row" style="margin:0"></span></div>
+  <div class="panel" id="paramBox" hidden>
+    <label class="f" id="paramLabel"></label><div class="row"><input type="text" id="paramInput" class="grow"><button id="paramGo" class="primary">Assign</button><button id="paramCancel">Cancel</button></div>
+  </div>
+  <div class="gallery" id="gallery"></div>
+
+  <div class="row" style="margin-top:16px">
+    <button id="btnSaveKey">Save key</button><button id="btnSave" class="primary">Save profile</button><span id="saveNote" class="stats"></span>
+  </div>
+
+  <h2>3 · Customize the selected key (same building blocks as the official app)</h2>
+  <div class="panel" id="customBox">
+    <div class="row"><input type="text" id="alias" maxlength="40" placeholder="Title" class="grow">
+      <button id="btnPickIcon">Select icon file</button><input type="file" id="iconFile" accept="image/*" hidden><button id="btnEmptyIcon">Empty icon</button>
+      <button id="btnImport">Import…</button><input type="file" id="importFile" accept=".json,.txt" hidden><button id="btnExportKey">Export key</button><button id="btnExportProfile">Export profile</button></div>
+    <label class="f">Action sequence: click an action on the right to add it, or drag it in. Rows run in order from the top.</label>
+    <div class="row" style="align-items:flex-start;flex-wrap:nowrap"><div id="seq" class="grow panel" style="min-height:90px"></div><div id="palette" class="palette"></div></div>
+    <div class="row"><label><input type="checkbox" id="hid"> HID mode (the pad does it itself, no app needed; not every action supports it: <a href="https://www.eezbotfun.com/en/wiki/HID-Mode" target="_blank" rel="noopener">details</a>)</label><span class="spacer"></span><button id="btnDeleteKey">Delete key</button><button id="btnSerialSend">Also send over serial</button></div>
+    <details><summary>Raw script lines</summary><textarea id="actions" spellcheck="false"></textarea></details>
+  </div>
+</div>
+
+<!-- ============ SCREEN ============ -->
+<div class="wrap" id="pageScreen" hidden>
+  <canvas id="screen" width="480" height="200"></canvas>
+  <div class="stats" id="stats" style="margin:6px 0">idle</div>
+  <div class="row"><button id="btnStop">Stop</button><button id="btnClear">Clear screen</button></div>
+  <div class="panel" style="margin-top:8px">
+    <label><input type="checkbox" id="toastOn" checked> When I press a key on the pad, show its action on the LCD for</label>
+    <input type="number" id="toastSecs" value="2" min="1" max="10" style="width:70px"> seconds
+    <div class="row"><label><input type="checkbox" id="toastWake"> Also switch the pad to this custom screen when a key is pressed (otherwise it only appears if the pad is already showing it)</label></div>
+  </div>
+  <h2>Pick a widget</h2>
+  <div class="gallery" id="widgets"></div>
+  <div class="panel" id="wparams" style="margin-top:12px" hidden></div>
+  <div class="stats" id="sportsNote" hidden style="margin-top:8px">Scores come from ESPN's unofficial public scoreboard (personal use; refreshed every 20 s). Data may change without notice.</div>
+  <details>
+    <summary>Experimental: fast animations (the LCD can't keep up; usually choppy)</summary>
+    <div class="row" id="anims"></div>
+  </details>
+</div>
+<!-- ============ DEVICE ============ -->
+<div class="wrap" id="pageDevice" hidden>
+  <h2 style="margin-top:4px">Active configuring device</h2>
+  <div class="panel"><table class="dev"><thead><tr><th>Type</th><th>Status</th><th>Firmware</th><th>Pad drive</th></tr></thead><tbody><tr id="devRow"></tr></tbody></table></div>
+
+  <h2>Device menu (same items as the official app's right-click menu)</h2>
+  <div class="panel">
+    <div class="row"><b style="min-width:150px">Set RGB backlight</b><input type="color" id="led" value="#4466ff"><input type="range" id="bright" min="1" max="100" value="50"><button id="btnLed">Set RGB backlight</button><span class="stats">RGB is only on the wired version</span></div>
+    <div class="row"><b style="min-width:150px">Sync configuration</b><button id="btnSync">Reload every profile from the pad</button><button id="btnBackup">Back up the pad drive now</button></div>
+    <div class="row"><b style="min-width:150px">Switch theme</b><button id="btnTheme2">Light / dark</button></div>
+    <div class="row"><b style="min-width:150px">Clear pairing information</b><button disabled title="The command for the 2.4G dongle isn't published and I couldn't find it">Clear pairing information</button><span class="stats">Not available: only for the 2.4G dongle and the command is unknown</span></div>
+    <div class="row"><b style="min-width:150px">Dynamic Profile Setup</b><button disabled title="How the official app switches the pad's profile is unknown">Dynamic Profile Setup</button><span class="stats">Not available: needs the unknown command that switches the pad's profile from the PC</span></div>
+  </div>
+
+  <h2>Upgrade firmware</h2>
+  <div class="panel">
+    <div class="stats">The pad downloads the latest firmware from the vendor's server over Wi-Fi, so it needs your Wi-Fi name and password. This is the same command the official web page sends. Don't unplug the pad while it updates. I have not tried this one.</div>
+    <div class="row"><input type="text" id="fwSsid" placeholder="Wi-Fi name (no dots)" class="grow"><input type="password" id="fwPass" placeholder="Wi-Fi password" class="grow"><button id="btnFw">Upgrade firmware</button></div>
+  </div>
+
+  <h2>Run programs from key presses</h2>
+  <div class="panel">
+    <label><input type="checkbox" id="runActs"> When I press a key whose action is "Launch App" (and HID mode is off), start that program on this PC</label>
+    <div class="stats" id="runNote"></div>
+  </div>
+
+  <h2>Links</h2>
+  <div class="row"><a href="https://www.eezbotfun.com" target="_blank" rel="noopener">Official web site</a> · <a href="https://www.eezbotfun.com/en/files" target="_blank" rel="noopener">Presets gallery</a> · <a href="https://github.com/eezbotfun/8-key-macropad/releases" target="_blank" rel="noopener">Official config app downloads</a></div>
+  <div class="stats">Pad Studio 2.0 · unofficial · works with the EezBotFun 8-key macropad</div>
+</div>
+
+<!-- ============ EXCEL ============ -->
+<div class="wrap" id="pageExcel" hidden>
+  <h2 style="margin-top:4px">Set up the pad for Excel</h2>
+  <div class="row" id="excelLayouts"></div>
+  <div class="stats">Fills the current profile (see the Keys tab) with Excel keys. Nothing is written to the pad until you click Save there. Put the Excel tips on the LCD from Screen → "Excel tips".</div>
+
+  <h2>Ask an AI for Excel help: prompt builder</h2>
+  <div class="panel">
+    <div class="row"><div class="grow"><label class="f">Excel version</label><select id="xlVer"><option>Microsoft 365</option><option>Excel 2024</option><option>Excel 2021</option><option>Excel 2019</option><option>Excel 2016</option><option>Excel for the web</option></select></div>
+      <div class="grow"><label class="f">Desired output</label><select id="xlOut"><option>Dynamic array formula</option><option>LET block</option><option>LAMBDA function</option><option>VBA macro</option><option>Office Script</option><option>Power Query (M) steps</option><option>PivotTable / chart setup</option><option>Whichever is most efficient</option></select></div></div>
+    <label class="f">Spreadsheet structure (headers, data types, Table names)</label><textarea id="xlStruct" placeholder="Table Sales: Date (date), Region (text), Rep (text), Amount (number)"></textarea>
+    <label class="f">Sample data (5–10 rows, pasted from Excel)</label><textarea id="xlSample" placeholder="Paste rows here"></textarea>
+    <label class="f">Objective: exactly what to clean, analyse or automate</label><textarea id="xlObj" placeholder="Total Amount per Region for the last 90 days, sorted high to low"></textarea>
+    <div class="row"><label><input type="checkbox" id="xlLegacy"> Needs backward compatibility (no dynamic arrays / LET / LAMBDA)</label></div>
+    <label class="f">Your finished prompt (paste it into Claude, ChatGPT, Copilot…)</label><textarea id="xlPrompt" readonly style="min-height:200px"></textarea>
+    <div class="row"><button id="xlCopy" class="primary">Copy prompt</button><span class="stats" id="xlCopied"></span></div>
+  </div>
+
+  <h2>Excel shortcut cheat sheet</h2>
+  <input type="text" id="xlSearch" placeholder="Search shortcuts…" style="max-width:340px"><div id="xlSheet" style="margin-top:8px"></div>
+</div>
+
+<div class="wrap" style="padding-bottom:0"><label><input type="checkbox" id="rawMon"> Show everything the pad sends (press keys / turn the wheel to see what it reports)</label></div>
+<div id="log"></div>
+
+<script src="core.js"></script>
+<script src="library.js"></script>
+<script src="leagues.js"></script>
+<script>
+const C = PadCore, L = PadLib, $ = (id) => document.getElementById(id);
+const state = { t: null, profile: 1, key: 0, profiles: 5, drive: null, drafts: {}, cat: 'All' };
+function log(msg, cls) { const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = new Date().toLocaleTimeString() + '  ' + msg; $('log').append(d); while ($('log').children.length > 300) $('log').firstChild.remove(); $('log').scrollTop = 1e9; }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- navigation ---------- */
+function showPage(p) { for (const n of ['Keys', 'Screen', 'Excel', 'Device']) { $('page' + n).hidden = p !== n.toLowerCase(); $('nav' + n).className = p === n.toLowerCase() ? 'on' : ''; } }
+$('navKeys').onclick = () => showPage('keys'); $('navScreen').onclick = () => showPage('screen'); $('navExcel').onclick = () => showPage('excel'); $('navDevice').onclick = () => { showPage('device'); renderDevice(); };
+
+/* ---------- LCD simulator mirror ---------- */
+const ctx = $('screen').getContext('2d'), sim = new C.Simulator(); let dirty = true; sim.onChange = () => { dirty = true; };
+(function paint() { if (dirty) { sim.render(ctx); dirty = false; } requestAnimationFrame(paint); })();
+
+/* ---------- connection ---------- */
+let rxBuf = new Uint8Array(0);
+function onRx(bytes) {
+  if ($('rawMon').checked) log('pad says  ' + [...bytes].map((b) => b.toString(16).padStart(2, '0')).join(' ') + '   |   ' + [...bytes].map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.')).join(''), 'good');
+  rxBuf = C.concat(rxBuf, bytes); for (;;) { const i = rxBuf.indexOf(10); if (i < 0) break; const line = rxBuf.slice(0, i); rxBuf = rxBuf.slice(i + 1); handleLine(line); } }
+function handleLine(raw) {
+  const text = new TextDecoder().decode(raw).replace(/\r$/, ''); if (!text) return;
+  const ke = L.parseKeyEvent(text); if (ke) { onKeyPress(ke.profile, ke.key); return; }
+  if (text.startsWith('n=')) { state.profiles = Math.max(1, +text.slice(2) || 5); buildTabs(); }
+  else if (text.startsWith('v=')) { state.fw = text.slice(2); log('pad firmware ' + state.fw, 'good'); renderDevice(); } else if (!/^[abc]=/.test(text)) log('pad: ' + text);
+}
+async function useTransport(t, label) { await closeTransport(); state.t = t; $('pConn').textContent = label; $('pConn').className = 'pill ok'; $('btnDisc').hidden = false; $('btnSerial').hidden = true; await t.write(C.F.queryVersion()); await t.write(C.F.queryProfiles()); }
+async function closeTransport() { stopRun(); if (state.t && state.t.close) await state.t.close().catch(() => {}); state.t = null; $('pConn').textContent = 'screen not connected'; $('pConn').className = 'pill'; $('btnDisc').hidden = true; $('btnSerial').hidden = false; }
+$('btnSerial').onclick = async () => {
+  if (!navigator.serial) return alert('The screen needs Chrome or Edge (WebSerial).');
+  try {
+    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] }); await port.open({ baudRate: 115200 });
+    let open = true; const reader = port.readable.getReader();
+    (async () => { try { while (open) { const { value, done } = await reader.read(); if (done) break; if (value) onRx(value); } } catch (e) { log('read ended: ' + e.message); } })();
+    await useTransport({ kind: 'serial',
+      async write(bytes) { sim.feed(bytes); const w = port.writable.getWriter(); try { await w.write(bytes); } finally { w.releaseLock(); } },
+      async close() { open = false; try { await reader.cancel(); } catch (e) {} try { reader.releaseLock(); } catch (e) {} try { await port.close(); } catch (e) {} } }, 'screen connected');
+  } catch (e) {
+    if (e.name === 'NotFoundError') log('No port was chosen. In the popup pick "USB Serial Device (COM…)" and click Connect. If there is no popup or it is empty, this is not a full Chrome/Edge window.', 'bad');
+    else log('connect failed: ' + e.message + ' — close the official config app first (only one program can hold the port).', 'bad');
+  }
+};
+$('btnDisc').onclick = closeTransport;
+async function send(bytes) { if (state.t) await state.t.write(bytes); else sim.feed(bytes); }
+
+/* ---------- pad drive (helper server) ---------- */
+async function api(path, opts) { const r = await fetch(path, opts); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status); return r; }
+async function checkDrive() {
+  try { state.drive = await (await api('/api/status')).json(); } catch (e) { state.drive = null; }
+  const d = state.drive;
+  $('pDrive').textContent = !d ? 'keys: start node server.js' : !d.drive ? 'pad drive not found' : 'pad drive ' + d.drive + (d.writable ? '' : ' (read-only)');
+  $('pDrive').className = 'pill ' + (d && d.drive ? (d.writable ? 'ok' : 'warn') : 'warn');
+  renderDevice(); if (d && d.drive) loadProfile(state.profile);
+}
+
+/* ---------- icons from emoji ---------- */
+function makeIcon(emoji, color) {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  g.fillStyle = color; g.beginPath(); if (g.roundRect) g.roundRect(0, 0, 64, 64, 14); else g.rect(0, 0, 64, 64); g.fill();
+  g.font = '34px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(emoji, 32, 35); return c;
+}
+
+/* ---------- keys: draft model ---------- */
+const emptyKey = () => ({ alias: '', hid: false, actions: [], iconUrl: null, iconCanvas: null, dirty: false });
+const draft = () => state.drafts[state.profile] || (state.drafts[state.profile] = Array.from({ length: 8 }, emptyKey));
+async function loadProfile(p) {
+  const arr = Array.from({ length: 8 }, emptyKey); state.drafts[p] = arr;
+  if (state.drive && state.drive.drive) await Promise.all(arr.map(async (e, i) => {
+    try { const c = await (await api(`/api/key?p=${p}&k=${i + 1}`)).json(); Object.assign(e, { alias: c.alias, hid: c.hid, actions: c.actions }); e.iconUrl = `/api/icon?p=${p}&k=${i + 1}&_=${Date.now()}`; } catch (err) { /* leave empty */ }
+  }));
+  if (state.profile === p) renderKeys();
+}
+function buildTabs() {
+  $('tabs').innerHTML = '';
+  for (let p = 1; p <= state.profiles; p++) { const b = document.createElement('button'); b.textContent = 'Profile ' + p; b.className = p === state.profile ? 'on' : ''; b.onclick = () => { state.profile = p; state.key = 0; buildTabs(); if (!state.drafts[p]) loadProfile(p); renderKeys(); }; $('tabs').append(b); }
+  for (const [txt, d, tip] of [['+', 1, 'Add a profile (needs Connect pad)'], ['−', -1, 'Remove the last profile (needs Connect pad)']]) { const b = document.createElement('button'); b.textContent = txt; b.title = tip; b.onclick = () => changeProfiles(d); $('tabs').append(b); }
+}
+function renderKeys(skipEditor) {
+  const d = draft(); $('keys').innerHTML = '';
+  d.forEach((e, i) => {
+    const b = document.createElement('button'); b.className = 'key' + (i === state.key ? ' sel' : '') + (e.dirty ? ' dirty' : '');
+    const src = e.iconCanvas ? e.iconCanvas.toDataURL() : e.iconUrl;
+    b.innerHTML = (src ? `<img src="${src}" alt="" onerror="this.outerHTML='<div class=noimg></div>'">` : '<div class="noimg"></div>') + `<b>Key ${i + 1}</b><span></span>`;
+    b.querySelector('span').textContent = e.alias || (e.actions[0] || 'empty').slice(0, 22); b.onclick = () => { state.key = i; renderKeys(); }; $('keys').append(b);
+  });
+  const e = d[state.key]; $('selTitle').textContent = `Selected: Profile ${state.profile}, Key ${state.key + 1}` + (e.alias ? ` — ${e.alias}` : '');
+  if (!skipEditor) renderEditor(e);
+  const n = d.filter((x) => x.dirty).length; $('btnSave').disabled = !n || !(state.drive && state.drive.writable); $('saveNote').textContent = n ? `${n} unsaved key(s)` : (state.drive && state.drive.drive ? 'all saved' : 'start node server.js to save to the pad');
+}
+function assign(id, value) {
+  const r = L.applyPreset(id, value), e = draft()[state.key]; Object.assign(e, { alias: r.alias, hid: r.hid, actions: r.actions, iconCanvas: makeIcon(r.emoji, r.color), dirty: true });
+  if (state.key < 7) state.key++; renderKeys();
+}
+// gallery
+let pending = null;
+function renderGallery() {
+  const q = $('search').value.toLowerCase(), cats = ['All', ...new Set(L.PRESETS.map((p) => p.cat))];
+  $('chips').innerHTML = ''; cats.forEach((c) => { const b = document.createElement('button'); b.className = 'chip' + (c === state.cat ? ' on' : ''); b.textContent = c; b.onclick = () => { state.cat = c; renderGallery(); }; $('chips').append(b); });
+  $('gallery').innerHTML = '';
+  L.PRESETS.filter((p) => (state.cat === 'All' || p.cat === state.cat) && p.name.toLowerCase().includes(q)).forEach((p) => {
+    const b = document.createElement('button'); b.className = 'pre'; b.innerHTML = `<b>${p.emoji}</b><span></span>`; b.querySelector('span').textContent = p.name;
+    b.onclick = () => { if (p.param) { pending = p; $('paramLabel').textContent = p.param.label; $('paramInput').placeholder = p.param.placeholder; $('paramInput').value = ''; $('paramBox').hidden = false; $('paramInput').focus(); } else { $('paramBox').hidden = true; assign(p.id); } };
+    $('gallery').append(b);
+  });
+}
+$('search').oninput = renderGallery;
+$('paramGo').onclick = () => { if (pending) { assign(pending.id, $('paramInput').value); pending = null; $('paramBox').hidden = true; } };
+$('paramInput').onkeydown = (ev) => { if (ev.key === 'Enter') $('paramGo').onclick(); };
+$('paramCancel').onclick = () => { pending = null; $('paramBox').hidden = true; };
+L.LAYOUTS.forEach((l) => { const o = document.createElement('option'); o.value = l.id; o.textContent = l.name; $('layoutSel').append(o); });
+$('btnLayout').onclick = () => applyLayout($('layoutSel').value);
+function applyLayout(id) { const l = L.LAYOUTS.find((x) => x.id === id), d = draft(); l.keys.forEach((id, i) => { const r = L.applyPreset(id); Object.assign(d[i], { alias: r.alias, hid: r.hid, actions: r.actions, iconCanvas: makeIcon(r.emoji, r.color), dirty: true }); }); renderKeys(); log(`layout "${l.name}" applied to profile ${state.profile} (not saved yet)`); }
+$('btnReload').onclick = () => loadProfile(state.profile);
+let saveOnly = null; // null = every changed key (Save profile); a number = just that key (Save key)
+$('btnSaveKey').onclick = async () => { saveOnly = state.key; try { await $('btnSave').onclick(); } finally { saveOnly = null; } };
+$('btnSave').onclick = async () => {
+  const d = draft(); $('btnSave').disabled = true;
+  try {
+    for (let i = 0; i < 8; i++) {
+      const e = d[i]; if (!e.dirty || (saveOnly !== null && i !== saveOnly)) continue;
+      if (e.deleted && !e.actions.length && !e.alias && !e.iconCanvas) { for (const what of ['key', 'icon']) await api(`/api/${what}?p=${state.profile}&k=${i + 1}`, { method: 'DELETE' }); e.deleted = false; e.dirty = false; continue; }
+      e.deleted = false; // the key was refilled after being deleted: save it normally
+      const lines = L.scriptFromConfig(e.actions); if (lines.length > 20) throw new Error(`key ${i + 1} would run ${lines.length} script lines on the pad (max 20)`);
+      await api(`/api/key?p=${state.profile}&k=${i + 1}`, { method: 'PUT', body: JSON.stringify({ alias: e.alias, hid: e.hid, actions: e.actions, script: lines }) });
+      if (e.iconCanvas) { const blob = await new Promise((r) => e.iconCanvas.toBlob(r, 'image/png')); await api(`/api/icon?p=${state.profile}&k=${i + 1}`, { method: 'PUT', body: blob }); }
+      else if (e.clearIcon) { await api(`/api/icon?p=${state.profile}&k=${i + 1}`, { method: 'DELETE' }); e.clearIcon = false; }
+      e.dirty = false;
+    }
+    log(`profile ${state.profile} saved to the pad drive. If the pad doesn't show the change, unplug and replug it.`, 'good'); await checkDrive();
+  } catch (err) { log('save failed: ' + err.message, 'bad'); }
+  renderKeys();
+};
+/* ---------- key editor: title, icon, action sequence, HID mode (mirrors the official app) ---------- */
+let seq = [];
+const curKey = () => draft()[state.key];
+const MODS_SHOW = [['CONTROL', 'Ctrl'], ['SHIFT', 'Shift'], ['ALT', 'Alt'], ['WINDOWS', 'Win']];
+function touch() { const e = curKey(); e.actions = L.actionsToLines(seq); e.dirty = true; $('actions').value = e.actions.join('\n'); renderKeys(true); }
+function renderEditor(e) { $('alias').value = e.alias; $('hid').checked = e.hid; $('actions').value = e.actions.join('\n'); seq = L.linesToActions(e.actions); renderSeq(); }
+function field(q, a) {
+  let el;
+  if (q.type === 'mods') {
+    el = document.createElement('span');
+    MODS_SHOW.forEach(([m, n]) => { const l = document.createElement('label'), c = document.createElement('input'); c.type = 'checkbox'; c.checked = (a.p[q.id] || []).includes(m);
+      c.onchange = () => { const s = new Set(a.p[q.id] || []); if (c.checked) s.add(m); else s.delete(m); a.p[q.id] = MODS_SHOW.map((x) => x[0]).filter((x) => s.has(x)); touch(); }; l.append(c, ' ' + n); el.append(l, ' '); });
+    return el;
+  }
+  if (q.type === 'bool') { const l = document.createElement('label'), c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!a.p[q.id]; c.title = q.label; c.onchange = () => { a.p[q.id] = c.checked; touch(); }; l.append(c, ' ' + q.label); return l; }
+  if (q.type === 'select') { el = document.createElement('select'); q.options.forEach((o, i) => { const op = document.createElement('option'); op.value = o; op.textContent = q.labels ? q.labels[i] : o; el.append(op); }); el.value = a.p[q.id]; }
+  else { el = document.createElement('input'); el.type = q.type === 'number' ? 'number' : 'text'; el.value = a.p[q.id]; el.placeholder = q.label; }
+  el.title = q.label; el.oninput = el.onchange = () => { a.p[q.id] = el.value; touch(); }; return el;
+}
+function renderSeq() {
+  const box = $('seq'); box.innerHTML = '';
+  if (!seq.length) box.innerHTML = '<div class="stats">No actions yet. Click an action on the right, or pick a preset above.</div>';
+  seq.forEach((a, i) => {
+    const row = document.createElement('div'), nm = document.createElement('span'); row.className = 'arow'; nm.className = 'nm';
+    const def = L.actionById[a.type];
+    nm.textContent = def ? `${def.emoji} ${def.name}` : a.type === 'official' ? `Official action ACT ${a.code}` : 'Script line'; row.append(nm);
+    if (def) def.params.forEach((q) => row.append(field(q, a)));
+    else { const inp = document.createElement('input'); inp.type = 'text'; inp.value = a.type === 'official' ? a.arg : a.line; inp.oninput = () => { if (a.type === 'official') a.arg = inp.value; else a.line = inp.value; touch(); }; row.append(inp); }
+    const mv = (dlt) => () => { const j = i + dlt; if (j < 0 || j >= seq.length) return; [seq[i], seq[j]] = [seq[j], seq[i]]; renderSeq(); touch(); };
+    for (const [txt, fn, tip] of [['↑', mv(-1), 'Move up'], ['↓', mv(1), 'Move down'], ['✕', () => { seq.splice(i, 1); renderSeq(); touch(); }, 'Delete']]) { const b = document.createElement('button'); b.textContent = txt; b.title = tip; b.onclick = fn; row.append(b); }
+    box.append(row);
+  });
+}
+function addAction(id) { seq.push(L.newAction(id)); renderSeq(); touch(); }
+function renderPalette() {
+  $('palette').innerHTML = '';
+  for (const a of L.ACTIONS) { const b = document.createElement('button'); b.draggable = true; b.textContent = `${a.emoji} ${a.name}`; b.onclick = () => addAction(a.id); b.ondragstart = (ev) => ev.dataTransfer.setData('text/plain', a.id); $('palette').append(b); }
+}
+$('seq').ondragover = (ev) => { ev.preventDefault(); $('seq').classList.add('drop'); };
+$('seq').ondragleave = () => $('seq').classList.remove('drop');
+$('seq').ondrop = (ev) => { ev.preventDefault(); $('seq').classList.remove('drop'); const id = ev.dataTransfer.getData('text/plain'); if (L.actionById[id]) addAction(id); };
+$('alias').oninput = () => { const e = curKey(); e.alias = $('alias').value; e.dirty = true; renderKeys(true); };
+$('hid').onchange = () => { const e = curKey(); e.hid = $('hid').checked; e.dirty = true; renderKeys(true); };
+$('actions').onchange = () => { const e = curKey(); e.actions = $('actions').value.split(/\r?\n/).map((s) => s.trimEnd()).filter(Boolean); e.dirty = true; seq = L.linesToActions(e.actions); renderSeq(); renderKeys(true); };
+function squareIcon(img) { const c = document.createElement('canvas'); c.width = c.height = 64; const s = Math.max(64 / img.width, 64 / img.height); c.getContext('2d').drawImage(img, (64 - img.width * s) / 2, (64 - img.height * s) / 2, img.width * s, img.height * s); return c; }
+$('btnPickIcon').onclick = () => $('iconFile').click();
+$('iconFile').onchange = async () => { const f = $('iconFile').files[0]; $('iconFile').value = ''; if (!f) return; const e = curKey(); e.iconCanvas = squareIcon(await createImageBitmap(f)); e.clearIcon = false; e.dirty = true; renderKeys(true); };
+$('btnEmptyIcon').onclick = () => { const e = curKey(); e.iconCanvas = null; e.iconUrl = null; e.clearIcon = true; e.dirty = true; renderKeys(true); };
+$('btnDeleteKey').onclick = () => { if (!confirm(`Delete key ${state.key + 1} of profile ${state.profile}? When you save, the old version is kept in pad-backup-changes.`)) return; Object.assign(curKey(), emptyKey(), { deleted: true, dirty: true }); renderKeys(); };
+function download(name, data, type = 'text/plain') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+const cfgText = (e) => `Alias=${e.alias}\r\nHidMode=${e.hid ? 'True' : 'False'}\r\n` + e.actions.map((l) => l + '\r\n').join('');
+async function iconData(e) {
+  if (e.iconCanvas) return e.iconCanvas.toDataURL('image/png'); if (!e.iconUrl) return null;
+  try { const b = await (await fetch(e.iconUrl)).blob(); return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); }); } catch (x) { return null; }
+}
+$('btnExportKey').onclick = () => download(`profile_${state.profile}_key_${state.key + 1}.txt`, cfgText(curKey()));
+$('btnExportProfile').onclick = async () => { const keys = []; for (const e of draft()) keys.push({ alias: e.alias, hid: e.hid, actions: e.actions, icon: await iconData(e) }); download(`pad-studio-profile-${state.profile}.json`, JSON.stringify({ format: 'pad-studio-profile', version: 1, keys }, null, 1), 'application/json'); log('profile exported'); };
+$('btnImport').onclick = () => $('importFile').click();
+$('importFile').onchange = async () => {
+  const f = $('importFile').files[0]; $('importFile').value = ''; if (!f) return; const text = await f.text();
+  try {
+    if (/\.json$/i.test(f.name)) {
+      const j = JSON.parse(text); if (j.format !== 'pad-studio-profile' || !Array.isArray(j.keys)) throw new Error('not a Pad Studio profile file');
+      if (!confirm(`Replace the 8 keys of profile ${state.profile} with this file? (Nothing is written to the pad until you save.)`)) return;
+      const d = draft();
+      for (let i = 0; i < 8; i++) { const k = j.keys[i] || {}; Object.assign(d[i], emptyKey(), { alias: String(k.alias || ''), hid: !!k.hid, actions: (k.actions || []).map(String), dirty: true }); if (k.icon && /^data:image\/png;base64,/.test(k.icon)) d[i].iconCanvas = squareIcon(await createImageBitmap(await (await fetch(k.icon)).blob())); }
+    } else { // the official config text: Alias=, HidMode=, then the action lines
+      let alias = '', hid = false; const acts = [];
+      for (const l of text.split(/\r?\n/)) { if (l.startsWith('Alias=')) alias = l.slice(6); else if (l.startsWith('HidMode=')) hid = /true/i.test(l.slice(8)); else if (l.trim()) acts.push(l.trimEnd()); }
+      Object.assign(curKey(), { alias, hid, actions: acts, dirty: true });
+    }
+    renderKeys(); log('imported ' + f.name + ' (not saved to the pad yet)', 'good');
+  } catch (err) { log('import failed: ' + err.message, 'bad'); }
+};
+async function changeProfiles(delta) {
+  if (!state.t) return alert('Click Connect pad first: the number of profiles is set over USB serial.');
+  const n = state.profiles + delta; if (n < 1 || n > 255) return;
+  if (delta < 0 && !confirm(`Remove profile ${state.profiles}? The pad will have ${n} profile(s).`)) return;
+  try { await state.t.write(C.F.setProfileCount(n)); state.profiles = n; if (state.profile > n) state.profile = n; buildTabs(); renderKeys(); log(`profile count set to ${n}`, 'good'); } catch (e) { log('could not change profiles: ' + e.message, 'bad'); }
+}
+
+/* ---------- Device page: the official app's device list + right-click menu ---------- */
+function setTheme(t) { document.documentElement.dataset.theme = t; try { localStorage.setItem('padTheme', t); } catch (e) { /* storage blocked */ } }
+try { const t = localStorage.getItem('padTheme'); if (t) setTheme(t); } catch (e) { /* storage blocked */ }
+$('btnTheme').onclick = $('btnTheme2').onclick = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+function renderDevice() {
+  const r = $('devRow'); if (!r.children.length) for (let i = 0; i < 4; i++) r.append(document.createElement('td'));
+  const d = state.drive; r.children[0].textContent = '8-key macropad (USB)'; r.children[1].textContent = state.t ? (state.t.kind === 'mock' ? 'mock device' : 'connected') : 'not connected';
+  r.children[2].textContent = state.fw || '–'; r.children[3].textContent = d && d.drive ? d.drive + (d.writable ? ' (read/write)' : ' (read-only)') : 'not found';
+  $('runActs').disabled = !(d && d.runActions); $('runNote').textContent = d && d.runActions ? 'The helper was started with --run-actions, so this can work.' : 'Off. To allow it, restart the helper with:  node server.js --run-actions';
+}
+$('btnSync').onclick = async () => { for (let p = 1; p <= state.profiles; p++) await loadProfile(p); log(`reloaded all ${state.profiles} profiles from the pad`, 'good'); };
+$('btnBackup').onclick = async () => { try { const j = await (await api('/api/backup', { method: 'POST' })).json(); log('pad drive backed up to ' + j.dest, 'good'); } catch (e) { log('backup failed: ' + e.message + ' (is the helper running?)', 'bad'); } };
+$('btnFw').onclick = async () => {
+  if (!state.t || state.t.kind !== 'serial') return alert('Click Connect pad first.');
+  try {
+    const frame = C.F.wifi($('fwSsid').value, $('fwPass').value);
+    if (!confirm('Upgrade the pad firmware now?\n\nThe pad will join your Wi-Fi and download the latest firmware from the vendor. Do NOT unplug it until it has restarted. I have not tested this command on your pad.')) return;
+    await state.t.write(frame); log('firmware update requested; watch the pad screen and do not unplug it', 'good');
+  } catch (e) { log('firmware update not sent: ' + e.message, 'bad'); }
+};
+$('btnSerialSend').onclick = async () => {
+  if (!state.t) return alert('Click Connect pad first.');
+  try { const p = state.profile, k = state.key + 1, e = draft()[state.key]; await state.t.write(C.F.alias(p, k, e.alias || null)); const lines = L.scriptFromConfig(e.actions); await state.t.write(C.F.script(p, k, lines.length ? lines.join('\n') : null)); if (e.hid) await state.t.write(C.F.enableHid(p, k)); log(`sent key ${k} over serial`, 'good'); } catch (err) { log('serial send failed: ' + err.message, 'bad'); }
+};
+$('btnLed').onclick = async () => { if (!state.t) return alert('Click Connect pad first.'); await state.t.write(C.F.led($('led').value, $('bright').value)); log('backlight sent'); };
+
+/* ---------- screen widgets ---------- */
+const run = { w: null, p: {}, state: {}, timer: null, busy: false, last: '', sent: 0, t0: 0, stats: null, sports: null, sportsAt: 0, selected: null };
+function stopRun() { clearInterval(run.timer); run.timer = null; run.w = null; }
+function readParams(w) { const p = {}; for (const q of w.params || []) { const el = $('wp_' + q.id); p[q.id] = el ? el.value : q.def; } return p; }
+function renderWidgets() {
+  L.WIDGETS.forEach((w) => { const b = document.createElement('button'); b.className = 'pre'; b.id = 'w_' + w.id; b.innerHTML = `<b>${w.emoji}</b><span>${w.name}</span>`; b.onclick = () => selectWidget(w); $('widgets').append(b); });
+  for (const a of C.ANIMATIONS) { const b = document.createElement('button'); b.textContent = a.name; b.onclick = () => startAnim(a); $('anims').append(b); }
+}
+function selectWidget(w) {
+  run.selected = w; document.querySelectorAll('#widgets .pre').forEach((b) => b.classList.toggle('on', b.id === 'w_' + w.id));
+  const box = $('wparams'); box.innerHTML = ''; box.hidden = false; $('sportsNote').hidden = w.id !== 'sports';
+  for (const q of w.params) {
+    const lab = document.createElement('label'); lab.className = 'f'; lab.textContent = q.label; box.append(lab);
+    const el = q.type === 'select' || q.type === 'league' ? document.createElement('select') : q.type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
+    el.id = 'wp_' + q.id; if (q.type === 'league') fillLeagues(el); else if (q.type === 'select') q.options.forEach((o, i) => { const op = document.createElement('option'); op.value = o; op.textContent = q.labels ? q.labels[i] : o; el.append(op); }); else if (q.type !== 'textarea') el.type = q.type;
+    el.value = q.def; box.append(el);
+  }
+  if (w.id === 'sports') {
+    const lp = document.createElement('div'); lp.className = 'panel'; lp.style.marginTop = '10px';
+    lp.innerHTML = '<b>Team logos on the pad\'s keys</b><div class="stats">The LCD canvas can\'t show pictures (its protocol has no images), but the 8 keys can. This puts the logos of the current games on keys 1–8 of a profile: away, home, away, home… It replaces that profile\'s keys; old versions are kept in pad-backup-changes.</div><div class="row"><select id="logoProfile" style="width:auto"></select><button id="btnLogos">Put logos on keys</button></div>';
+    box.append(lp); for (let i = 1; i <= state.profiles; i++) { const o = document.createElement('option'); o.value = i; o.textContent = 'Profile ' + i; $('logoProfile').append(o); } $('logoProfile').value = state.profiles; $('btnLogos').onclick = putLogos;
+  }
+  const row = document.createElement('div'); row.className = 'row'; const go = document.createElement('button'); go.className = 'primary'; go.textContent = w.every ? 'Start on pad' : 'Send to pad'; go.onclick = () => startWidget(w); row.append(go); box.append(row);
+  if (!state.t) { const n = document.createElement('div'); n.className = 'stats'; n.textContent = 'Not connected: you will only see the preview here. Click Connect pad to send it to the LCD.'; box.append(n); }
+}
+function fillLeagues(el) {
+  const grp = (label, items) => { const g = document.createElement('optgroup'); g.label = label; items.forEach(([v, n]) => { const o = document.createElement('option'); o.value = v; o.textContent = n; g.append(o); }); el.append(g); };
+  grp('Popular', L.LEAGUES.map((l) => [l.path, l.name]));
+  for (const [s, label, ls] of PadLeagues) grp(`${label} (${ls.length})`, ls.map(([l, n]) => [s + '/' + l, n]));
+}
+function leagueName(path) { for (const [s, , ls] of PadLeagues) for (const [l, n] of ls) if (s + '/' + l === path) return n; return path; }
+async function putLogos() {
+  if (!state.drive || !state.drive.writable) return alert('Start the helper (node server.js) so the app can write icons to the pad.');
+  const p = +$('logoProfile').value; run.sportsAt = 0; await fetchSports(readParams(L.WIDGETS.find((w) => w.id === 'sports')));
+  const plan = L.logoKeyPlan((run.sports && run.sports.games) || []); if (!plan.length) return alert('No games with logos in this league right now.');
+  if (!confirm(`Replace keys 1-${plan.length} of profile ${p} with these team logos (${plan.map((x) => x.alias).join(', ')})?\nThe old versions are kept in pad-backup-changes.`)) return;
+  try {
+    for (let i = 0; i < plan.length; i++) {
+      const png = await (await fetch(plan[i].url)).blob();
+      await api(`/api/icon?p=${p}&k=${i + 1}`, { method: 'PUT', body: png });
+      await api(`/api/key?p=${p}&k=${i + 1}`, { method: 'PUT', body: JSON.stringify({ alias: plan[i].alias, hid: false, actions: [] }) });
+    }
+    log(`logos for ${plan.length / 2} game(s) saved to profile ${p}. If the keys don't change on the pad, unplug and replug it.`, 'good'); delete state.drafts[p]; if (p === state.profile) loadProfile(p);
+  } catch (e) { log('logos failed: ' + e.message, 'bad'); }
+}
+async function fetchSports(p) {
+  if (Date.now() - run.sportsAt < 20000 && run.sports && run.sports.league.path === p.league) return;
+  const lg = L.LEAGUES.find((l) => l.path === p.league) || { path: p.league, name: leagueName(p.league) }; run.sportsAt = Date.now();
+  try {
+    const r = await fetch(L.scoreboardUrl(lg)); if (!r.ok) throw new Error('HTTP ' + r.status);
+    const order = { in: 0, pre: 1, post: 2 }, games = L.parseEvents(await r.json()).sort((a, b) => order[a.state] - order[b.state] || new Date(a.date) - new Date(b.date));
+    run.sports = { league: lg, games }; log(`${lg.name}: ${games.length} games (${games.filter((g) => g.state === 'in').length} live)`);
+  } catch (e) { log('scores fetch failed: ' + e.message, 'bad'); if (!run.sports || run.sports.league.path !== p.league) run.sports = { league: lg, games: [] }; }
+}
+async function tick() {
+  const w = run.w; if (!w || run.busy) return; run.busy = true;
+  try {
+    if (w.needs === 'stats') { try { run.stats = await (await api('/api/stats')).json(); } catch (e) { run.stats = null; } }
+    if (w.needs === 'sports') await fetchSports(run.p);
+    const panels = w.gen({ now: new Date(), p: run.p, state: run.state, stats: run.stats, sports: run.sports }), key = JSON.stringify(panels);
+    if (key !== run.last) { run.last = key; run.lastFrames = w.raw === 'pcs' ? [C.pcsFrame(panels)] : C.animFrames(panels); for (const f of run.lastFrames) await send(f); run.sent++; run.lastBytes = key.length; }
+    $('stats').textContent = `${w.name}: ${run.sent} screen update(s) sent` + (w.every ? ` · checks every ${w.every / 1000}s, sends only when the text changes` : ' · sent once, the pad keeps showing it');
+  } catch (e) { log('widget stopped: ' + e.message, 'bad'); stopRun(); }
+  run.busy = false;
+}
+function startWidget(w) {
+  stopRun(); run.w = w; run.p = readParams(w); run.state = w.id === 'pomodoro' ? { t0: Date.now() } : w.id === 'sports' ? { seen: {}, alert: null } : {}; run.last = ''; run.sent = 0; run.sportsAt = 0;
+  if (!w.every) { tick().then(() => { run.w = null; }); return; }
+  tick(); run.timer = setInterval(tick, w.every);
+}
+$('wparams').addEventListener('change', () => { if (run.w) { run.p = readParams(run.w); run.last = ''; run.sportsAt = 0; } });
+function startAnim(a) { stopRun(); const t0 = performance.now(); run.w = { name: a.name, every: 1000 / a.fps, gen: () => a.gen((performance.now() - t0) / 1000) }; run.p = {}; run.state = {}; run.last = ''; run.sent = 0; run.timer = setInterval(() => { run.last = ''; tick(); }, 1000 / a.fps); tick(); }
+$('btnStop').onclick = () => { stopRun(); $('stats').textContent = 'stopped'; };
+$('btnClear').onclick = async () => { stopRun(); await send(C.cusFrame({ clear_canvas: true })); $('stats').textContent = 'cleared'; };
+
+/* ---------- key presses reported by the pad: flash the tile, toast on the LCD ---------- */
+let toastTimer = null;
+async function onKeyPress(p, k) {
+  let entry = (state.drafts[p] || [])[k - 1];
+  if (!entry && state.drive && state.drive.drive) { try { entry = await (await api(`/api/key?p=${p}&k=${k}`)).json(); } catch (e) { /* unknown key */ } }
+  const text = L.keyToast(entry, k); log(`key pressed: profile ${p} key ${k} → ${text.replace('\n', ' · ')}`, 'good');
+  if ($('runActs').checked && state.drive && state.drive.runActions) api(`/api/press?p=${p}&k=${k}`, { method: 'POST' }).then((r) => r.json()).then((r) => { if (r.launched && r.launched.length) log('launched: ' + r.launched.map((x) => x.path + (x.ok ? '' : ' (' + x.why + ')')).join(', '), 'good'); }).catch((e) => log('could not run action: ' + e.message, 'bad'));
+  if (p === state.profile) { const tile = $('keys').children[k - 1]; if (tile) { tile.classList.add('flash'); setTimeout(() => tile.classList.remove('flash'), 400); } }
+  if (!$('toastOn').checked || !state.t) return;
+  try {
+    await send(C.cusFrame({ ...L.toastPanel(text), activate: $('toastWake').checked })); // overlay only: no clear, so the widget stays underneath
+    clearTimeout(toastTimer); toastTimer = setTimeout(restoreAfterToast, +$('toastSecs').value * 1000);
+  } catch (e) { log('toast failed: ' + e.message, 'bad'); }
+}
+async function restoreAfterToast() {
+  try { if (run.lastFrames && (run.w || run.last)) for (const f of run.lastFrames) await send(f); else await send(C.cusFrame({ clear_canvas: true, activate: $('toastWake').checked })); } catch (e) { /* ignore */ }
+}
+
+/* ---------- Excel page ---------- */
+for (const l of L.LAYOUTS.filter((x) => x.id.startsWith('excel'))) { const b = document.createElement('button'); b.textContent = 'Fill profile with: ' + l.name; b.onclick = () => { applyLayout(l.id); showPage('keys'); }; $('excelLayouts').append(b); }
+function buildXl() { $('xlPrompt').value = L.buildExcelPrompt({ version: $('xlVer').value, structure: $('xlStruct').value, sample: $('xlSample').value, objective: $('xlObj').value, output: $('xlOut').value, legacy: $('xlLegacy').checked }); $('xlCopied').textContent = ''; }
+['xlVer', 'xlOut', 'xlStruct', 'xlSample', 'xlObj', 'xlLegacy'].forEach((id) => $(id).addEventListener('input', buildXl));
+$('xlCopy').onclick = async () => { try { await navigator.clipboard.writeText($('xlPrompt').value); $('xlCopied').textContent = 'Copied. Paste it into your AI chat.'; } catch (e) { $('xlPrompt').select(); $('xlCopied').textContent = 'Select-all done: press Ctrl+C.'; } };
+function renderXlSheet() {
+  const q = $('xlSearch').value.toLowerCase(); $('xlSheet').innerHTML = '';
+  L.PRESETS.filter((p) => p.cat === 'Excel' && (p.name + ' ' + p.hint).toLowerCase().includes(q)).forEach((p) => {
+    const r = document.createElement('div'); r.className = 'row panel'; r.style.margin = '4px 0'; r.innerHTML = `<b style="font-size:20px;width:30px">${p.emoji}</b><span class="grow"><b></b><br><span class="stats"></span></span><button>Put on selected key</button>`;
+    r.querySelector('b + b, span b').textContent = p.name; r.querySelector('.stats').textContent = p.hint; r.querySelector('button').onclick = () => { assign(p.id); showPage('keys'); }; $('xlSheet').append(r);
+  });
+}
+$('xlSearch').oninput = renderXlSheet; buildXl(); renderXlSheet();
+
+renderPalette(); buildTabs(); renderKeys(); renderGallery(); renderWidgets(); renderDevice(); checkDrive(); setInterval(renderDevice, 1500);
+log('Ready. Keys: click a key, then pick a preset. Screen: pick a widget. Close the official app before clicking Connect pad.');
+</script>
+</body>
+</html>
