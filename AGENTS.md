@@ -31,7 +31,8 @@ node ui-test.js             # drives the page in headless Edge; stubs all pad wr
 | `library.js` | Presets, layouts, **action model in the official file format**, widgets, ESPN parsing, Excel mode, key-event parsing. UMD |
 | `leagues.js` | Generated list of 359 ESPN leagues (from a discovery sweep). Data only |
 | `index.html` | The whole UI (Keys / Screen / Excel / Device tabs). Plain JS, no build step |
-| `server.js` | Localhost helper: static files, `/api/key|icon|status|stats|backup|press` |
+| `server.js` | Localhost helper: static files, `/api/key|icon|status|stats|backup|press|lcd` (`/api/lcd` = agent status for the LCD widget) |
+| `agent-status.js` | CLI that POSTs a status to `/api/lcd`; exits 0 even if the helper is down (safe in hooks) |
 | `test.js`, `ui-test.js`, `test-fixtures/` | Tests. Fixtures are **real files written by the official app v1.8.0** |
 
 Keep logic that can be pure in `core.js` / `library.js` so `test.js` can cover it; keep `index.html` thin.

@@ -80,6 +80,29 @@
   XF('xf-let', 'LET', 'LET', 'LET names sub-expressions: faster and readable');
   XF('xf-sumifs', 'SUMIFS', 'SUMIFS', 'SUMIFS sums with multiple criteria');
   XF('xf-iferror', 'IFERROR', 'IFERROR', 'IFERROR wraps a formula with a fallback');
+  /* AI agents: the pad types into whatever window has focus, so these drive Claude Code, ChatGPT, Cursor, any terminal agent.
+     Key choices follow Claude Code (Enter approves, Esc rejects/interrupts, Esc Esc rewinds, Shift+Tab switches mode); other tools differ. */
+  const AI = (id, name, emoji, lines, hint) => PRESETS.push({ ...P('AI agents', id, name, emoji, '#6b46c1', lines), hint });
+  const say = (text) => ['STRING ' + text, 'ENTER'];
+  AI('ai-approve', 'Approve', '✅', ['ENTER'], 'Enter accepts the highlighted choice');
+  AI('ai-always', 'Yes, always', '✔️', ['2'], 'Option 2: allow and do not ask again');
+  AI('ai-reject', 'Reject / stop', '⛔', ['ESC'], 'Esc rejects a prompt or interrupts the agent');
+  AI('ai-rewind', 'Undo (Esc Esc)', '⏪', ['ESC', 'DELAY 150', 'ESC'], 'Esc twice rewinds the conversation');
+  AI('ai-mode', 'Switch mode', '🔀', ['SHIFT TAB'], 'Shift+Tab cycles plan / accept-edits modes');
+  AI('ai-dictate', 'Dictate', '🎙️', ['WINDOWS h'], 'Win+H: speak your prompt');
+  AI('ai-pastesend', 'Paste & send', '📨', ['CONTROL v', 'DELAY 200', 'ENTER'], 'Pastes the clipboard and submits it');
+  AI('ai-newline', 'New line', '↩️', ['SHIFT ENTER'], 'Shift+Enter: line break without sending');
+  AI('ai-continue', 'Continue', '▶️', say('continue'), 'Types "continue" and sends');
+  AI('ai-tests', 'Run tests', '🧪', say('Run the tests and fix any failures'), 'Prompt');
+  AI('ai-explain', 'Explain', '💡', say('Explain what you just did in plain language'), 'Prompt');
+  AI('ai-review', 'Review', '🔍', say('Review these changes for bugs and risks'), 'Prompt');
+  AI('ai-commit', 'Commit', '📦', say('Commit these changes with a clear message'), 'Prompt');
+  AI('ai-summary', 'Summarize', '📝', say('Summarize where we are and the next steps'), 'Prompt');
+  AI('ai-fix', 'Fix errors', '🛠️', say('Fix the errors above'), 'Prompt');
+  AI('ai-simplify', 'Simplify', '✂️', say('Simplify this without changing its behavior'), 'Prompt');
+  for (const [c, e] of [['clear', '🧹'], ['compact', '🗜️'], ['cost', '💲'], ['status', '📊'], ['model', '🧠'], ['resume', '⏯️'], ['init', '🆕'], ['help', '❓']]) AI('ai-/' + c, '/' + c, e, say('/' + c), 'Claude Code slash command');
+  PRESETS.push(P('AI agents', 'ai-slash', 'Slash command…', '⚡', '#6b46c1', null, { id: 'cmd', label: 'Command (without the slash)', placeholder: 'compact', tpl: (t) => say('/' + t.replace(/^\//, '')) }),
+    P('AI agents', 'ai-prompt', 'Custom prompt…', '💬', '#6b46c1', null, { id: 'text', label: 'Prompt to type and send', placeholder: 'Add tests for the new function', tpl: say }));
   const byId = Object.fromEntries(PRESETS.map((p) => [p.id, p]));
   const LAYOUTS = [
     { id: 'editing', name: 'Editing', keys: ['copy', 'paste', 'cut', 'undo', 'redo', 'selectall', 'save', 'find'] },
@@ -88,6 +111,9 @@
     { id: 'launcher', name: 'Web launcher', keys: ['google', 'youtube', 'github', 'gmail', 'terminal', 'settings', 'screenshot', 'nextprof'] },
   ];
   LAYOUTS.push(
+    { id: 'ai-control', name: 'AI agent: control', keys: ['ai-approve', 'ai-always', 'ai-reject', 'ai-mode', 'ai-continue', 'ai-rewind', 'ai-dictate', 'ai-pastesend'] },
+    { id: 'ai-prompts', name: 'AI agent: prompts', keys: ['ai-continue', 'ai-tests', 'ai-explain', 'ai-review', 'ai-commit', 'ai-summary', 'ai-fix', 'ai-simplify'] },
+    { id: 'ai-commands', name: 'AI agent: slash commands', keys: ['ai-/clear', 'ai-/compact', 'ai-/cost', 'ai-/status', 'ai-/model', 'ai-/resume', 'ai-/init', 'ai-/help'] },
     { id: 'excel-essentials', name: 'Excel essentials', keys: ['xl-filldown', 'xl-autosum', 'xl-filter', 'xl-table', 'xl-format', 'xl-pastevalues', 'xl-autofit', 'xl-freeze'] },
     { id: 'excel-formulas', name: 'Excel formulas', keys: ['xf-xlookup', 'xf-filter', 'xf-unique', 'xf-sort', 'xf-let', 'xf-sumifs', 'xf-iferror', 'xl-insertfn'] },
     { id: 'excel-navigation', name: 'Excel navigation', keys: ['xl-selcol', 'xl-selrow', 'xl-prevsheet', 'xl-nextsheet', 'xl-gotostart', 'xl-gotoend', 'xl-absref', 'xl-edit'] });
@@ -334,6 +360,16 @@
   const scriptFromConfig = (lines) => scriptFromActions(linesToActions(lines));
   /** Plain script lines (as used by the presets) -> official config lines. */
   const officialLines = (plain) => actionsToLines(linesToActions(plain));
+
+  /* ---------- Agent status: shows the latest message POSTed to the helper's /api/lcd (e.g. from a Claude Code hook) ---------- */
+  const AGENT_STATES = { working: ['#3a3208', '#FFE9A8', 'WORKING'], done: ['#0d3b25', '#CFFFE2', 'DONE'], error: ['#4a1414', '#FFD6D6', 'ERROR'], waiting: ['#10284a', '#CFE3FF', 'NEEDS YOU'], info: ['#101820', '#FFFFFF', ''] };
+  WIDGETS.push({ id: 'agent', name: 'Agent status', emoji: '🤖', every: 1000, needs: 'lcd', params: [{ id: 'idle', label: 'Go back to "idle" after this many seconds without news (0 = never)', type: 'number', def: 0 }],
+    gen: ({ lcd, p }) => {
+      if (!lcd || !lcd.at) return card('Waiting for an agent…\nPOST to http://127.0.0.1:8777/api/lcd', '#101820');
+      if (+p.idle > 0 && lcd.ageSec > +p.idle) return card('Idle', '#101820', { fg: '#8a93a8' });
+      const [bg, fg, label] = AGENT_STATES[lcd.state] || AGENT_STATES.info;
+      return card((label ? label + '\n' : '') + (lcd.text || ''), bg, { fg });
+    } });
 
   /* ---------- PC monitor on the pad's own built-in screen ("pcs" frames; fields follow the vendor's example JSON) ---------- */
   WIDGETS.push({ id: 'pcmonitor', name: 'PC monitor (built-in screen)', emoji: '🖥️', every: 2000, needs: 'stats', raw: 'pcs', params: [],

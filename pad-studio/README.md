@@ -43,6 +43,23 @@ The official app's file format was learned by creating every action in it and re
 | PC-status screen | **PC monitor (built-in screen)** widget (`pcs` frames, unverified on the pad). |
 | Official web site / presets gallery links | Yes (Device tab). |
 
+## AI agents
+The pad types into whatever window has focus, so it can drive Claude Code, ChatGPT, Cursor or any terminal agent.
+- **Keys tab → Layout menu:** *AI agent: control* (Approve = Enter, Yes always = 2, Reject/stop = Esc, Switch mode = Shift+Tab, Continue, Undo = Esc Esc, Dictate = Win+H, Paste & send),
+  *AI agent: prompts* (run tests, explain, review, commit, summarize, fix errors, simplify) and *AI agent: slash commands* (`/clear /compact /cost /status /model /resume /init /help`).
+  Gallery category **AI agents** has all of them plus *Slash command…* and *Custom prompt…* (you type the text). The key choices follow Claude Code; other tools differ.
+- **Screen tab → Agent status:** shows the latest message pushed to the helper, coloured by state (`working`, `done`, `error`, `waiting`, `info`).
+  Push one with `node agent-status.js done "Tests passed"` (never fails loudly, exits 0 if the helper is down) or `POST http://127.0.0.1:8777/api/lcd` with `{"state":"done","text":"..."}`
+  (200 characters max; cross-site browser requests are refused).
+- **Example Claude Code hooks** (add to your own `~/.claude/settings.json`; this repo does not change it; the endpoint and script are tested, running them from inside Claude Code is not):
+```json
+{ "hooks": {
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /path/to/pad-studio/agent-status.js working Working" }] }],
+  "Notification":     [{ "hooks": [{ "type": "command", "command": "node /path/to/pad-studio/agent-status.js waiting" }] }],
+  "Stop":             [{ "hooks": [{ "type": "command", "command": "node /path/to/pad-studio/agent-status.js done" }] }]
+} }
+```
+
 ## How the pad talks (all observed or from the vendor docs)
 - **Drive:** the pad exposes a ~1.5 MB FAT drive: `configs/profile_P_key_K.txt` (`Alias=`, `HidMode=`, action lines), `scripts/…` (same lines without `ACT`), `app_icons/profile_P_key_K.png` (64x64). Chrome cannot open a drive root, so `server.js` does it.
 - **Serial (USB CDC, VID 0x303A, 115200):**

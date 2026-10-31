@@ -221,4 +221,17 @@ t('Wi-Fi frame for firmware update matches the official page; SSID with a dot is
   assert.strictEqual(Buffer.from(C.F.wifi('MyNet', 'pw123')).toString('latin1'), 'ebf\x0c4MyNet.pw123'); // "4MyNet.pw123" is 12 bytes
   assert.throws(() => C.F.wifi('My.Net', 'x'));
 });
+t('AI agents: presets, three layouts and the Agent status widget', () => {
+  const ai = Lb.PRESETS.filter((p) => p.cat === 'AI agents'); assert.ok(ai.length >= 24);
+  const pad = (id, v) => Lb.scriptFromConfig(Lb.applyPreset(id, v).actions);
+  assert.deepStrictEqual(pad('ai-approve'), ['ENTER']); assert.deepStrictEqual(pad('ai-rewind'), ['ESC', 'DELAY 150', 'ESC']); assert.deepStrictEqual(pad('ai-mode'), ['SHIFT TAB']);
+  assert.deepStrictEqual(pad('ai-/compact'), ['STRING /compact', 'ENTER']); assert.deepStrictEqual(pad('ai-slash', '/memory'), ['STRING /memory', 'ENTER']); assert.deepStrictEqual(pad('ai-slash', 'cost'), ['STRING /cost', 'ENTER']);
+  assert.deepStrictEqual(pad('ai-prompt', 'Add tests'), ['STRING Add tests', 'ENTER']);
+  for (const id of ['ai-control', 'ai-prompts', 'ai-commands']) { const l = Lb.LAYOUTS.find((x) => x.id === id); assert.strictEqual(l.keys.length, 8, id); l.keys.forEach((k) => assert.strictEqual(Lb.byId[k].cat, 'AI agents', id + ':' + k)); }
+  const w = Lb.WIDGETS.find((x) => x.id === 'agent'), g = (lcd, idle = 0) => w.gen({ lcd, p: { idle } })[0];
+  assert.ok(g(null).text.startsWith('Waiting for an agent')); assert.ok(g({ at: 0 }).text.startsWith('Waiting'));
+  assert.strictEqual(g({ at: 1, state: 'done', text: 'Tests passed', ageSec: 1 }).text, 'DONE\nTests passed'); assert.strictEqual(g({ at: 1, state: 'done', text: 'x', ageSec: 1 }).bg, '#0d3b25');
+  assert.strictEqual(g({ at: 1, state: 'error', text: 'Build failed', ageSec: 5 }).bg, '#4a1414'); assert.strictEqual(g({ at: 1, state: 'waiting', text: 'Approve?', ageSec: 5 }).text, 'NEEDS YOU\nApprove?');
+  assert.strictEqual(g({ at: 1, state: 'weird', text: 'hi', ageSec: 5 }).text, 'hi', 'unknown state falls back to plain info'); assert.strictEqual(g({ at: 1, state: 'done', text: 'x', ageSec: 99 }, 30).text, 'Idle', 'goes idle after the chosen time');
+});
 console.log('\n' + n + ' test groups passed');

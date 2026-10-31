@@ -466,7 +466,8 @@ async function tick() {
   try {
     if (w.needs === 'stats') { try { run.stats = await (await api('/api/stats')).json(); } catch (e) { run.stats = null; } }
     if (w.needs === 'sports') await fetchSports(run.p);
-    const panels = w.gen({ now: new Date(), p: run.p, state: run.state, stats: run.stats, sports: run.sports }), key = JSON.stringify(panels);
+    if (w.needs === 'lcd') { try { run.lcd = await (await api('/api/lcd')).json(); } catch (e) { run.lcd = null; } }
+    const panels = w.gen({ now: new Date(), p: run.p, state: run.state, stats: run.stats, sports: run.sports, lcd: run.lcd }), key = JSON.stringify(panels);
     if (key !== run.last) { run.last = key; run.lastFrames = w.raw === 'pcs' ? [C.pcsFrame(panels)] : C.animFrames(panels); for (const f of run.lastFrames) await send(f); run.sent++; run.lastBytes = key.length; }
     $('stats').textContent = `${w.name}: ${run.sent} screen update(s) sent` + (w.every ? ` · checks every ${w.every / 1000}s, sends only when the text changes` : ' · sent once, the pad keeps showing it');
   } catch (e) { log('widget stopped: ' + e.message, 'bad'); stopRun(); }

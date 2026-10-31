@@ -23,6 +23,7 @@ function findDrive() {
   return null;
 }
 let backedUp = false;
+let lcd = { state: 'info', text: '', at: 0, seq: 0 }; // latest message from /api/lcd
 function backup(drive) {
   const dest = path.join(__dirname, 'pad-backup-' + new Date().toISOString().replace(/[:.]/g, '-'));
   for (const d of [...REQUIRED, 'display_names']) if (fs.existsSync(drive + d)) fs.cpSync(drive + d, path.join(dest, d), { recursive: true });
@@ -75,6 +76,15 @@ http.createServer(async (req, res) => {
     const drive = findDrive();
     const GB = 1024 ** 3, r1 = (n) => Math.round(n * 10) / 10;
     if (u.pathname === '/api/stats') return send(res, 200, { cpu: r1(cpuPct), mem: r1(100 * (1 - os.freemem() / os.totalmem())), memUsedGB: r1((os.totalmem() - os.freemem()) / GB), memFreeGB: r1(os.freemem() / GB) });
+    // Agent status for the LCD: any local tool (a Claude Code hook, a script) POSTs here; the page's "Agent status" widget shows it.
+    // Cross-site browser requests are already refused above (Origin check); curl and scripts send no Origin.
+    if (u.pathname === '/api/lcd') {
+      if (req.method === 'POST') {
+        const j = JSON.parse((await readBody(req, 4000)).toString('utf8') || '{}');
+        lcd = { state: ['working', 'done', 'error', 'waiting', 'info'].includes(j.state) ? j.state : 'info', text: String(j.text || '').replace(/[\r\x00-\x08\x0b-\x1f]/g, '').slice(0, 200), at: Date.now(), seq: lcd.seq + 1 };
+      }
+      return send(res, 200, { ...lcd, ageSec: lcd.at ? Math.round((Date.now() - lcd.at) / 1000) : null });
+    }
     if (u.pathname === '/api/status') return send(res, 200, { drive, writable: WRITABLE && !!drive, backedUp, runActions: RUN });
     if (u.pathname.startsWith('/api/')) {
       if (!drive) return send(res, 503, { error: 'pad drive not found (is it plugged in?)' });
