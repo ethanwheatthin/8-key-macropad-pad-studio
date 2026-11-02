@@ -42,6 +42,7 @@ Keep logic that can be pure in `core.js` / `library.js` so `test.js` can cover i
 - The pad's drive holds `configs/`, `scripts/`, `app_icons/` (64x64 RGBA PNG per key), `display_names/`. Files are named `profile_P_key_K.txt/png`, CRLF.
 - **Official key format** (see `library.js`, golden-tested): `configs/` = per action an `ACT <code> <param>` line then the keystrokes the PC app would type; `scripts/` = what the pad itself runs (no ACT lines, max 20 lines).
   Codes: 1 web, 2 app, 3 folder, 4 text, 5 shortcut, 7 wait, 8 mouse move (absolute), 9 mouse click, a media (`MK_*`), b shell, c profile, d functional key, e device ctrl (`CC_*`), f open file. Code 6 never seen.
+- Official app's command letters (from its code): `0` key config, `1` rgb, `2`/`3` alias set/del, `4` wifi, `5` version, `6`/`7` script set/del, `8` query key, `9` change profile (`9<p>.0`), `a`/`b` set/reset HID, `c` reboot, `d` reset, `e` type, `f` id, `g` authenticate (`g<unix time>`, pad answers 64 hex), `h` bright theme, `i` clear paired dongle, `j` rgb mode, `k` rotate, `l`/`m` profile count query/set, `n` firmware upgrade, `z` restore last version.
 - Serial frames: `ebf` + 1-byte length + command (key config/queries); `cus` + u16be length + JSON (draw on the top **480x200** of the LCD; one panel per frame, 48 panels max, payload <= 2043 B, **no images**); `pcs` (built-in PC monitor, unverified on hardware).
 - `cus` with `activate:true` switches the pad to its custom screen; overlays/toasts use `activate:false`.
 - The pad sends `ebf.k.<profile>.<key>` on every key press (confirmed for keys 1-8).
@@ -66,4 +67,4 @@ Keep logic that can be pure in `core.js` / `library.js` so `test.js` can cover i
 - Personal data: `pad-studio/pad-backup-*` hold the user's key configs. Keep them out of anything shared (they are in `.gitignore`).
 
 ## Known gaps (do not claim these work)
-Dynamic Profile Switch (command to switch the pad's profile unknown), Clear pairing information, multi-language UI, running non-HID actions other than Launch App on the PC, official gallery preset import, firmware update over Wi-Fi, `pcs` monitor screen, and whether the pad reloads files without a replug (always say "unplug and replug if it doesn't update").
+Dynamic Profile Switch on the pad (Context panel built; its frame `9<p>.0` comes from disassembling the official app and is **unverified on the pad**; the official `g<time>` handshake is not implemented), Clear pairing information, multi-language UI, running non-HID actions other than Launch App on the PC, official gallery preset import, firmware update over Wi-Fi, `pcs` monitor screen, and whether the pad reloads files without a replug (always say "unplug and replug if it doesn't update").

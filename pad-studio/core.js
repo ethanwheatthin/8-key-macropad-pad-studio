@@ -75,6 +75,11 @@
     alias: (p, k, alias) => ebf(alias == null ? str('3' + p + '.' + k + ':') : concat(str('2' + p + '.' + k + ':'), str(alias))),
     script: (p, k, script) => ebf(script == null ? str('7' + p + '.' + k + ':') : concat(str('6' + p + '.' + k + ':'), str(script))),
     led: (hex, brightness) => ebf(str('1' + hex.replace('#', '') + brightness)),
+    /** Switch the pad to profile p (1-based). Found by disassembling the official app (Device.SetActiveProfileId); not yet seen working on the pad. */
+    gotoProfile: (p) => {
+      if (!Number.isInteger(p) || p < 1 || p > 255) throw new RangeError('profile must be 1..255');
+      return ebf(str('9' + p + '.0'));
+    },
   };
 
   /* ---------- cus frames: "cus" + u16be length + JSON ---------- */
@@ -192,7 +197,7 @@
 
   /* ---------- mock device for testing without hardware ---------- */
   class MockDevice {
-    constructor(onData) { this.onData = onData; this.buf = new Uint8Array(0); this.keys = {}; this.version = 'mock-1.0'; this.profiles = 5; this.log = []; }
+    constructor(onData) { this.onData = onData; this.buf = new Uint8Array(0); this.keys = {}; this.version = 'mock-1.0'; this.profiles = 5; this.active = 1; this.log = []; }
     write(bytes) {
       this.buf = concat(this.buf, bytes);
       for (;;) {
@@ -214,6 +219,7 @@
       if (type === '5') say('v=' + this.version);
       else if (type === 'l') say('n=' + this.profiles);
       else if (type === 'm') this.profiles = parseInt(td.decode(rest), 10);
+      else if (type === '9') this.active = parseInt(td.decode(rest), 10);
       else if (type === '0') { const k = pk(); const colon = rest.indexOf(0x3a); (this.keys[k] = this.keys[k] || {}).bytes = rest.slice(colon + 2); }
       else if (type === '2') { const k = pk(); (this.keys[k] = this.keys[k] || {}).alias = td.decode(rest.slice(rest.indexOf(0x3a) + 1)); }
       else if (type === '3') { const k = pk(); if (this.keys[k]) delete this.keys[k].alias; }

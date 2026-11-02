@@ -385,6 +385,83 @@
   }
   const toastPanel = (text) => ({ x: 0, y: 140, w: 480, h: 60, text, bg: '#1b3a7a', fg: '#FFFFFF', align: 'CENTER', 'border-radius': 8, activate: false });
 
-  const api = { PRESETS, LAYOUTS, applyPreset, byId, LEAGUES, scoreboardUrl, parseEvents, gameLine, gameCard, logoUrl, logoKeyPlan, WIDGETS, parseKeyEvent, keyToast, toastPanel, buildExcelPrompt, EXCEL_TIPS, ACTIONS, actionById, actionByCode, newAction, actionsToLines, scriptFromActions, scriptFromConfig, officialLines, linesToActions, MODS, FKEYS, MEDIA, DEVICE, CLICKS };
+  /* ---------- context-aware profiles: which pad profile fits the foreground window ---------- */
+  const TERMS = ['windowsterminal', 'pwsh', 'powershell', 'cmd', 'conhost'];
+  const DEFAULT_CONTEXT = {
+    enabled: false, fallback: 1,
+    rules: [
+      { name: 'Claude Code', process: [...TERMS], titleContains: 'claude|✳', profile: 6 }, // VS Code's title never shows Claude Code, so VS Code keeps the VS Code profile
+      { name: 'VS Code', process: ['code'], titleContains: '', profile: 7 },
+      { name: 'Visual Studio', process: ['devenv'], titleContains: '', profile: 8 },
+      { name: 'Microsoft Edge', process: ['msedge'], titleContains: '', profile: 9 },
+      { name: 'Steam', process: ['steam', 'steamwebhelper'], titleContains: '', profile: 10 },
+      { name: 'Spotify', process: ['spotify'], titleContains: '', profile: 11 },
+      { name: 'Claude Desktop', process: ['claude'], titleContains: '', profile: 12 },
+      { name: 'Terminal', process: [...TERMS], titleContains: '', profile: 13 },
+    ],
+  };
+  const procName = (s) => String(s || '').trim().toLowerCase().replace(/\.exe$/, '');
+  const winKey = (w) => w.process + '|' + w.title;
+  /** First rule that fits {process, title}; the fallback when none does; null when there is no usable window (lock screen, UAC). */
+  function matchContext(cfg, win) {
+    if (!win || !procName(win.process)) return null;
+    const proc = procName(win.process), title = String(win.title || '').toLowerCase();
+    for (const r of cfg.rules) {
+      if (r.process.length && !r.process.includes(proc)) continue;
+      if (r.titleContains && !r.titleContains.toLowerCase().split('|').some((alt) => alt && title.includes(alt))) continue; // 'a|b' = either
+      return { profile: r.profile, rule: r };
+    }
+    return { profile: cfg.fallback, rule: null };
+  }
+  /** One JSON line {"p":process,"t":title} from the helper's PowerShell watcher. */
+  function parseWindowLine(line) {
+    let j; try { j = JSON.parse(line); } catch (e) { return null; }
+    const process = procName(j && j.p);
+    return process && process !== 'idle' && process !== 'lockapp' ? { process, title: String((j && j.t) || '').slice(0, 300) } : null; // Idle = no foreground window; LockApp = lock screen
+  }
+  function normalizeContext(input) {
+    const bad = (m) => { throw new Error('context config: ' + m); };
+    if (!input || typeof input !== 'object' || !Array.isArray(input.rules)) bad('not an object with rules');
+    const prof = (n, what) => { if (!Number.isInteger(n) || n < 1 || n > 255) bad(what + ' must be a whole number 1..255'); return n; };
+    const text = (v, what) => { if (typeof v !== 'string' || v.length > 200) bad(what + ' must be text up to 200 characters'); return v; };
+    if (input.rules.length > 32) bad('at most 32 rules');
+    return {
+      enabled: input.enabled === true,
+      fallback: prof(input.fallback, 'fallback'),
+      rules: input.rules.map((r) => {
+        if (!r || !Array.isArray(r.process) || !r.process.every((x) => typeof x === 'string')) bad('process must be a list of names');
+        return { name: text(r.name, 'name'), process: r.process.map(procName).filter(Boolean), titleContains: text(r.titleContains == null ? '' : r.titleContains, 'titleContains'), profile: prof(r.profile, 'profile') };
+      }),
+    };
+  }
+  /** Decides when to tell the pad to change profile. ctx = {rules, fallback, profiles}; update() returns a profile to send or null. */
+  function createSwitcher(opts) {
+    const debounceMs = (opts && opts.debounceMs) || 600;
+    let lastSent = null, pending = null, held = null, skipped = null, cur = null; // held/cur are 'program|profile': a new title in the same app keeps a pause
+    return {
+      update(win, now, ctx) {
+        if (!win || !procName(win.process)) return null;
+        const p = matchContext(ctx, win).profile; cur = procName(win.process) + '|' + p;
+        if (held) { if (cur === held) return null; held = null; }
+        if (p < 1 || p > ctx.profiles) { skipped = `profile ${p} is not on the pad (it has ${ctx.profiles})`; pending = null; return null; }
+        skipped = null;
+        if (p === lastSent) { pending = null; return null; }
+        if (!pending || pending.profile !== p) { pending = { profile: p, since: now }; return null; }
+        if (now - pending.since < debounceMs) return null;
+        lastSent = p; pending = null; return p;
+      },
+      hold(win) { held = cur || procName(win.process) + '|'; pending = null; },
+      unsend() { lastSent = null; pending = null; }, // the write failed: send again once the match is stable
+      observePad(profile, win) { // the pad says which profile it is on; a change we did not send means the user switched by hand
+        if (profile === lastSent) return;
+        const unknownBefore = lastSent === null; lastSent = profile;
+        if (!unknownBefore) this.hold(win);
+      },
+      reset() { lastSent = null; pending = null; held = null; skipped = null; },
+      status: () => ({ lastSent, pending: pending && pending.profile, held: !!held, skipped }),
+    };
+  }
+
+  const api = { DEFAULT_CONTEXT, matchContext, parseWindowLine, normalizeContext, createSwitcher, PRESETS, LAYOUTS, applyPreset, byId, LEAGUES, scoreboardUrl, parseEvents, gameLine, gameCard, logoUrl, logoKeyPlan, WIDGETS, parseKeyEvent, keyToast, toastPanel, buildExcelPrompt, EXCEL_TIPS, ACTIONS, actionById, actionByCode, newAction, actionsToLines, scriptFromActions, scriptFromConfig, officialLines, linesToActions, MODS, FKEYS, MEDIA, DEVICE, CLICKS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.PadLib = api;
 })(typeof window !== 'undefined' ? window : globalThis);

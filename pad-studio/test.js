@@ -234,4 +234,87 @@ t('AI agents: presets, three layouts and the Agent status widget', () => {
   assert.strictEqual(g({ at: 1, state: 'error', text: 'Build failed', ageSec: 5 }).bg, '#4a1414'); assert.strictEqual(g({ at: 1, state: 'waiting', text: 'Approve?', ageSec: 5 }).text, 'NEEDS YOU\nApprove?');
   assert.strictEqual(g({ at: 1, state: 'weird', text: 'hi', ageSec: 5 }).text, 'hi', 'unknown state falls back to plain info'); assert.strictEqual(g({ at: 1, state: 'done', text: 'x', ageSec: 99 }, 30).text, 'Idle', 'goes idle after the chosen time');
 });
+t('gotoProfile builds the official change-profile frame', () => {
+  assert.strictEqual(hex(C.F.gotoProfile(4)), '656266' + '04' + '39342e30');
+  assert.strictEqual(hex(C.F.gotoProfile(1)), '65626604' + '39312e30');
+  assert.strictEqual(hex(C.F.gotoProfile(12)), '65626605' + '3931322e30');
+});
+t('gotoProfile rejects values the pad cannot have', () => {
+  for (const bad of [0, 256, 1.5, '4', NaN]) assert.throws(() => C.F.gotoProfile(bad), RangeError);
+});
+t('mock pad follows a change-profile frame', () => {
+  const d = new C.MockDevice(() => {}); assert.strictEqual(d.active, 1);
+  d.write(C.F.gotoProfile(3)); assert.strictEqual(d.active, 3);
+});
+const ctxCfg = { rules: Lb.DEFAULT_CONTEXT.rules, fallback: 1 };
+t('matchContext: Claude Code beats Terminal, plain terminal and other apps map to their own profile', () => {
+  const m = (process, title) => Lb.matchContext(ctxCfg, { process, title });
+  const cc = m('WindowsTerminal', '✳ Claude Code'); assert.strictEqual(cc.profile, 6); assert.strictEqual(cc.rule.name, 'Claude Code');
+  assert.strictEqual(m('WindowsTerminal', 'PowerShell').profile, 13);
+  assert.strictEqual(m('Code.exe', 'main.js - Visual Studio Code').profile, 7);
+  assert.strictEqual(m('Code.exe', 'CLAUDE.md - repo - Visual Studio Code').profile, 7, 'a file called CLAUDE.md is not Claude Code');
+  assert.strictEqual(m('WindowsTerminal', 'CLAUDE CODE').profile, 6, 'title keyword is case-insensitive');
+  assert.strictEqual(m('pwsh', '✳ Fix the tests').profile, 6, 'Claude Code puts a star in the terminal title');
+  assert.strictEqual(m('devenv', 'Solution1').profile, 8);
+  assert.strictEqual(m('msedge', 'Claude - Microsoft Edge').profile, 9, 'a title keyword must not leak into Edge');
+  assert.strictEqual(m('steamwebhelper', 'Steam').profile, 10);
+  assert.strictEqual(m('Spotify', 'Spotify Premium').profile, 11);
+  assert.strictEqual(m('claude', 'Claude').profile, 12);
+  const fb = m('notepad', 'x'); assert.strictEqual(fb.profile, 1); assert.strictEqual(fb.rule, null);
+  assert.strictEqual(Lb.matchContext(ctxCfg, null), null); assert.strictEqual(Lb.matchContext(ctxCfg, { process: '', title: '' }), null);
+});
+t('parseWindowLine: JSON lines from the helper, anything else is null', () => {
+  assert.deepStrictEqual(Lb.parseWindowLine('{"p":"Code.EXE","t":"a - b"}'), { process: 'code', title: 'a - b' });
+  assert.strictEqual(Lb.parseWindowLine('not json'), null); assert.strictEqual(Lb.parseWindowLine('{"p":"","t":"x"}'), null);
+  assert.strictEqual(Lb.parseWindowLine(JSON.stringify({ p: 'a', t: 'x'.repeat(500) })).title.length, 300);
+});
+t('normalizeContext accepts the defaults and refuses nonsense', () => {
+  assert.deepStrictEqual(Lb.normalizeContext(Lb.DEFAULT_CONTEXT), Lb.DEFAULT_CONTEXT);
+  const bad = (f) => assert.throws(() => Lb.normalizeContext(f(JSON.parse(JSON.stringify(Lb.DEFAULT_CONTEXT)))));
+  bad((c) => { c.rules[0].profile = 0; return c; }); bad((c) => { c.rules[0].profile = 256; return c; });
+  bad((c) => { c.fallback = 1.5; return c; }); bad((c) => { c.rules = Array(33).fill(c.rules[0]); return c; });
+  bad((c) => { c.rules[0].process = 'code'; return c; }); bad((c) => { c.rules[0].name = 'x'.repeat(201); return c; }); bad(() => 'nope');
+  const c = JSON.parse(JSON.stringify(Lb.DEFAULT_CONTEXT)); c.rules[0].process = ['Code.EXE']; c.enabled = 'yes';
+  const n2 = Lb.normalizeContext(c); assert.deepStrictEqual(n2.rules[0].process, ['code']); assert.strictEqual(n2.enabled, false);
+});
+t('switcher: debounce, no repeats, flicker, out-of-range, pad override, reset, empty window', () => {
+  const ctx = { rules: Lb.DEFAULT_CONTEXT.rules, fallback: 1, profiles: 13 };
+  const vs = { process: 'code', title: 'a.js - Visual Studio Code' }, edge = { process: 'msedge', title: 'x - Microsoft Edge' }, steam = { process: 'steam', title: 'Steam' };
+  let sw = Lb.createSwitcher();
+  assert.strictEqual(sw.update(vs, 0, ctx), null); assert.strictEqual(sw.update(vs, 599, ctx), null);
+  assert.strictEqual(sw.update(vs, 600, ctx), 7); assert.strictEqual(sw.update(vs, 1600, ctx), null, 'never the same profile twice');
+  assert.strictEqual(sw.status().lastSent, 7);
+  sw = Lb.createSwitcher();
+  assert.strictEqual(sw.update(edge, 0, ctx), null); assert.strictEqual(sw.update(steam, 300, ctx), null); assert.strictEqual(sw.update(edge, 500, ctx), null);
+  assert.strictEqual(sw.update(edge, 1000, ctx), null, 'the debounce restarted when the match changed'); assert.strictEqual(sw.update(edge, 1100, ctx), 9);
+  sw = Lb.createSwitcher(); const term = { process: 'windowsterminal', title: 'PowerShell' }, small = { ...ctx, profiles: 5 };
+  sw.update(term, 0, small); assert.strictEqual(sw.update(term, 5000, small), null); assert.ok(sw.status().skipped.includes('not on the pad'), sw.status().skipped);
+  assert.strictEqual(sw.update(edge, 6000, { ...small, rules: [{ name: 'E', process: ['msedge'], titleContains: '', profile: 4 }] }), null);
+  assert.strictEqual(sw.update(edge, 6700, { ...small, rules: [{ name: 'E', process: ['msedge'], titleContains: '', profile: 4 }] }), 4); assert.strictEqual(sw.status().skipped, null);
+  sw = Lb.createSwitcher(); sw.update(vs, 0, ctx); sw.update(vs, 700, ctx);
+  sw.observePad(2, vs); assert.strictEqual(sw.status().held, true); assert.strictEqual(sw.update(vs, 2000, ctx), null);
+  assert.strictEqual(sw.update(edge, 2100, ctx), null); assert.strictEqual(sw.status().held, false); assert.strictEqual(sw.update(edge, 2800, ctx), 9);
+  sw.observePad(9, edge); assert.strictEqual(sw.status().held, false, 'a key press in the profile we sent is not an override');
+  sw.reset(); assert.strictEqual(sw.update(edge, 5000, ctx), null); assert.strictEqual(sw.update(edge, 5700, ctx), 9, 'reset re-sends the current match');
+  sw = Lb.createSwitcher(); sw.update(vs, 0, ctx); assert.strictEqual(sw.update({ process: '', title: '' }, 500, ctx), null); assert.strictEqual(sw.update(null, 700, ctx), null);
+  assert.strictEqual(sw.update(vs, 800, ctx), 7, 'an empty window neither restarts nor ends the debounce');
+});
+t('switcher: a pad report before we have sent anything only teaches us the pad profile', () => {
+  const ctx = { rules: Lb.DEFAULT_CONTEXT.rules, fallback: 1, profiles: 13 }, vs = { process: 'code', title: 'a.js' };
+  let sw = Lb.createSwitcher(); sw.observePad(3, vs);
+  assert.strictEqual(sw.status().held, false); assert.strictEqual(sw.status().lastSent, 3);
+  sw.update(vs, 0, ctx); assert.strictEqual(sw.update(vs, 600, ctx), 7, 'still switches because the pad is on a different profile');
+  sw = Lb.createSwitcher(); sw.observePad(7, vs); sw.update(vs, 0, ctx); assert.strictEqual(sw.update(vs, 900, ctx), null, 'already on the matching profile');
+});
+t('review fixes: idle/lock-screen windows are no window, a failed send is retried, a hold survives title changes', () => {
+  assert.strictEqual(Lb.parseWindowLine('{"p":"Idle","t":""}'), null); assert.strictEqual(Lb.parseWindowLine('{"p":"LockApp","t":"Windows Default Lock Screen"}'), null);
+  assert.strictEqual(Lb.matchContext({ rules: [{ name: 'A', process: [], titleContains: 'x|y', profile: 4 }], fallback: 1 }, { process: 'z', title: 'has Y in it' }).profile, 4, 'titleContains takes | alternatives');
+  const ctx = { rules: Lb.DEFAULT_CONTEXT.rules, fallback: 1, profiles: 13 }, vs = { process: 'code', title: 'a.js - Visual Studio Code' }, edge = (t) => ({ process: 'msedge', title: t });
+  let sw = Lb.createSwitcher(); sw.update(vs, 0, ctx); assert.strictEqual(sw.update(vs, 600, ctx), 7);
+  sw.unsend(); assert.strictEqual(sw.status().lastSent, null); sw.update(vs, 1000, ctx); assert.strictEqual(sw.update(vs, 1600, ctx), 7, 'resent after the failed write');
+  sw = Lb.createSwitcher(); sw.update(edge('a'), 0, ctx); sw.update(edge('a'), 600, ctx); sw.observePad(2, edge('a'));
+  for (const [t, title] of [[1000, 'b'], [2000, 'YouTube - Microsoft Edge'], [3000, 'c']]) assert.strictEqual(sw.update(edge(title), t, ctx), null);
+  assert.strictEqual(sw.status().held, true, 'the same app with a new title keeps the pause');
+  sw.update(vs, 4000, ctx); assert.strictEqual(sw.status().held, false, 'another app ends the pause'); assert.strictEqual(sw.update(vs, 4600, ctx), 7);
+});
 console.log('\n' + n + ' test groups passed');

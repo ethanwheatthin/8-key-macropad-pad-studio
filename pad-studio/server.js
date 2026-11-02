@@ -67,6 +67,23 @@ function parseConfig(text) {
   return out;
 }
 
+// Foreground window for context-aware profiles (Windows only): a PowerShell loop prints one JSON line a second, /api/window reports the latest.
+const { parseWindowLine, normalizeContext, DEFAULT_CONTEXT } = require('./library.js');
+const WATCH_PS = `Add-Type -Name W -Namespace U -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int p); [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+while ($true) { $h = [U.W]::GetForegroundWindow(); $p = 0; [void][U.W]::GetWindowThreadProcessId($h, [ref]$p); $sb = New-Object Text.StringBuilder 300; $n = ''; if ($h -ne [IntPtr]::Zero -and $p -ne 0) { [void][U.W]::GetWindowText($h, $sb, 300); try { $n = (Get-Process -Id $p -ErrorAction Stop).ProcessName } catch {} }; @{ p = $n; t = $sb.ToString() } | ConvertTo-Json -Compress; Start-Sleep -Milliseconds 1000 }`;
+let fgWin = { process: '', title: '', at: 0 }, fgAlive = false;
+function startWindowWatcher() {
+  if (process.platform !== 'win32') return;
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WATCH_PS, 'utf16le').toString('base64')], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  let buf = ''; child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const w = parseWindowLine(buf.slice(0, i).trim()); buf = buf.slice(i + 1); fgWin = { ...(w || { process: '', title: '' }), at: Date.now() }; } });
+  child.on('exit', () => { fgAlive = false; }); child.on('error', () => { fgAlive = false; });
+  fgAlive = true; process.on('exit', () => child.kill());
+}
+const CTX_FILE = path.join(__dirname, 'context-rules.json');
+function loadContext() { try { return normalizeContext(JSON.parse(fs.readFileSync(CTX_FILE, 'utf8'))); } catch (e) { return DEFAULT_CONTEXT; } }
+
 http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x');
@@ -84,6 +101,18 @@ http.createServer(async (req, res) => {
         lcd = { state: ['working', 'done', 'error', 'waiting', 'info'].includes(j.state) ? j.state : 'info', text: String(j.text || '').replace(/[\r\x00-\x08\x0b-\x1f]/g, '').slice(0, 200), at: Date.now(), seq: lcd.seq + 1 };
       }
       return send(res, 200, { ...lcd, ageSec: lcd.at ? Math.round((Date.now() - lcd.at) / 1000) : null });
+    }
+    if (u.pathname === '/api/window') {
+      const age = fgWin.at ? Date.now() - fgWin.at : null, ok = fgAlive && age !== null && age < 3000;
+      return send(res, 200, ok ? { ok, process: fgWin.process, title: fgWin.title, ageMs: age } : { ok: false, process: '', title: '', ageMs: null });
+    }
+    if (u.pathname === '/api/context') { // app -> profile rules; lives beside server.js, not on the pad, so --read-only does not block it
+      if (req.method === 'PUT') {
+        let cfg; try { cfg = normalizeContext(JSON.parse((await readBody(req, 20000)).toString('utf8'))); } catch (e) { return send(res, 400, { error: e.message }); }
+        fs.writeFileSync(CTX_FILE + '.tmp', JSON.stringify(cfg, null, 2)); fs.renameSync(CTX_FILE + '.tmp', CTX_FILE);
+        return send(res, 200, cfg);
+      }
+      return send(res, 200, loadContext());
     }
     if (u.pathname === '/api/status') return send(res, 200, { drive, writable: WRITABLE && !!drive, backedUp, runActions: RUN });
     if (u.pathname.startsWith('/api/')) {
@@ -136,6 +165,7 @@ http.createServer(async (req, res) => {
     send(res, 200, fs.readFileSync(path.join(__dirname, file)), MIME[path.extname(file)]);
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }
 }).listen(PORT, '127.0.0.1', () => {
+  startWindowWatcher();
   const d = findDrive();
   console.log(`Pad Studio on http://127.0.0.1:${PORT}   drive: ${d || 'NOT FOUND'}   writes: ${WRITABLE ? 'on (auto-backup before the first write)' : 'read-only'}   key presses may launch programs: ${RUN ? 'YES (--run-actions)' : 'no'}`);
 });

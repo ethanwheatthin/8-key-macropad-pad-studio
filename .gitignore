@@ -6,3 +6,6 @@ pad-studio/*.log
 
 # 60 MB vendor binary: download it from https://github.com/eezbotfun/8-key-macropad/releases instead of re-hosting it
 eezbotfun_config.exe
+
+# Pad Studio: your own context-aware profile rules
+pad-studio/context-rules.json

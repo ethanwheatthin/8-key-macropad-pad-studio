@@ -136,6 +136,16 @@
     <div class="stats" id="runNote"></div>
   </div>
 
+  <h2>Context-aware profiles</h2>
+  <div class="panel">
+    <div class="stats">The pad changes profile to match the window in front (like the official app's Dynamic Profile Switch). It sends the same change-profile command the official app does; I have not yet seen it work on this pad. Needs this page connected to the pad, and the profile must exist on the pad (use + on the Keys tab). A key you press on the pad in another profile pauses it until the window changes.</div>
+    <label><input type="checkbox" id="ctxOn"> Switch the pad's profile when the active window changes</label>
+    <div class="stats" id="ctxStatus">Off</div>
+    <div id="ctxRules" style="margin:6px 0"></div>
+    <div class="row"><label>Any other window uses profile <input type="number" id="ctxFallback" min="1" max="255" style="width:70px"></label><button id="btnCtxSave" class="primary">Save rules</button><button id="btnCtxDefaults">Load defaults</button></div>
+    <div class="row"><label>Test: go to profile <input type="number" id="ctxTestProfile" min="1" max="255" value="4" style="width:70px"></label><button id="btnCtxTest">Send</button></div>
+  </div>
+
   <h2>Links</h2>
   <div class="row"><a href="https://www.eezbotfun.com" target="_blank" rel="noopener">Official web site</a> · <a href="https://www.eezbotfun.com/en/files" target="_blank" rel="noopener">Presets gallery</a> · <a href="https://github.com/eezbotfun/8-key-macropad/releases" target="_blank" rel="noopener">Official config app downloads</a></div>
   <div class="stats">Pad Studio 2.0 · unofficial · works with the EezBotFun 8-key macropad</div>
@@ -194,14 +204,14 @@ function handleLine(raw) {
   if (text.startsWith('n=')) { state.profiles = Math.max(1, +text.slice(2) || 5); buildTabs(); }
   else if (text.startsWith('v=')) { state.fw = text.slice(2); log('pad firmware ' + state.fw, 'good'); renderDevice(); } else if (!/^[abc]=/.test(text)) log('pad: ' + text);
 }
-async function useTransport(t, label) { await closeTransport(); state.t = t; $('pConn').textContent = label; $('pConn').className = 'pill ok'; $('btnDisc').hidden = false; $('btnSerial').hidden = true; await t.write(C.F.queryVersion()); await t.write(C.F.queryProfiles()); }
+async function useTransport(t, label) { await closeTransport(); state.t = t; switcher.reset(); $('pConn').textContent = label; $('pConn').className = 'pill ok'; $('btnDisc').hidden = false; $('btnSerial').hidden = true; await t.write(C.F.queryVersion()); await t.write(C.F.queryProfiles()); }
 async function closeTransport() { stopRun(); if (state.t && state.t.close) await state.t.close().catch(() => {}); state.t = null; $('pConn').textContent = 'screen not connected'; $('pConn').className = 'pill'; $('btnDisc').hidden = true; $('btnSerial').hidden = false; }
 $('btnSerial').onclick = async () => {
   if (!navigator.serial) return alert('The screen needs Chrome or Edge (WebSerial).');
   try {
     const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] }); await port.open({ baudRate: 115200 });
     let open = true; const reader = port.readable.getReader();
-    (async () => { try { while (open) { const { value, done } = await reader.read(); if (done) break; if (value) onRx(value); } } catch (e) { log('read ended: ' + e.message); } })();
+    (async () => { try { while (open) { const { value, done } = await reader.read(); if (done) break; if (value) onRx(value); } } catch (e) { log('read ended: ' + e.message); } if (open) { open = false; log('the pad was disconnected', 'bad'); closeTransport(); } })();
     await useTransport({ kind: 'serial',
       async write(bytes) { sim.feed(bytes); const w = port.writable.getWriter(); try { await w.write(bytes); } finally { w.releaseLock(); } },
       async close() { open = false; try { await reader.cancel(); } catch (e) {} try { reader.releaseLock(); } catch (e) {} try { await port.close(); } catch (e) {} } }, 'screen connected');
@@ -284,7 +294,7 @@ $('btnReload').onclick = () => loadProfile(state.profile);
 let saveOnly = null; // null = every changed key (Save profile); a number = just that key (Save key)
 $('btnSaveKey').onclick = async () => { saveOnly = state.key; try { await $('btnSave').onclick(); } finally { saveOnly = null; } };
 $('btnSave').onclick = async () => {
-  const d = draft(); $('btnSave').disabled = true;
+  const d = draft(); $('btnSave').disabled = true; let aliasSent = 0;
   try {
     for (let i = 0; i < 8; i++) {
       const e = d[i]; if (!e.dirty || (saveOnly !== null && i !== saveOnly)) continue;
@@ -294,9 +304,11 @@ $('btnSave').onclick = async () => {
       await api(`/api/key?p=${state.profile}&k=${i + 1}`, { method: 'PUT', body: JSON.stringify({ alias: e.alias, hid: e.hid, actions: e.actions, script: lines }) });
       if (e.iconCanvas) { const blob = await new Promise((r) => e.iconCanvas.toBlob(r, 'image/png')); await api(`/api/icon?p=${state.profile}&k=${i + 1}`, { method: 'PUT', body: blob }); }
       else if (e.clearIcon) { await api(`/api/icon?p=${state.profile}&k=${i + 1}`, { method: 'DELETE' }); e.clearIcon = false; }
+      // the LCD label is the pad's own stored alias, which a drive save doesn't set (it shows SCRIPT otherwise)
+      if (state.t && state.t.kind === 'serial') { try { await state.t.write(C.F.alias(state.profile, i + 1, e.alias || null)); aliasSent++; } catch (err) { log(`alias for key ${i + 1} not sent: ${err.message}`, 'bad'); } }
       e.dirty = false;
     }
-    log(`profile ${state.profile} saved to the pad drive. If the pad doesn't show the change, unplug and replug it.`, 'good'); await checkDrive();
+    log(`profile ${state.profile} saved to the pad drive. If the pad doesn't show the change, unplug and replug it.` + (aliasSent ? ` Key titles sent over serial (${aliasSent}).` : state.t ? '' : ' To make the LCD show the titles instead of SCRIPT, click Connect pad and save again.'), 'good'); await checkDrive();
   } catch (err) { log('save failed: ' + err.message, 'bad'); }
   renderKeys();
 };
@@ -486,6 +498,7 @@ $('btnClear').onclick = async () => { stopRun(); await send(C.cusFrame({ clear_c
 /* ---------- key presses reported by the pad: flash the tile, toast on the LCD ---------- */
 let toastTimer = null;
 async function onKeyPress(p, k) {
+  if (lastWin) switcher.observePad(p, lastWin);
   let entry = (state.drafts[p] || [])[k - 1];
   if (!entry && state.drive && state.drive.drive) { try { entry = await (await api(`/api/key?p=${p}&k=${k}`)).json(); } catch (e) { /* unknown key */ } }
   const text = L.keyToast(entry, k); log(`key pressed: profile ${p} key ${k} → ${text.replace('\n', ' · ')}`, 'good');
@@ -515,7 +528,55 @@ function renderXlSheet() {
 }
 $('xlSearch').oninput = renderXlSheet; buildXl(); renderXlSheet();
 
-renderPalette(); buildTabs(); renderKeys(); renderGallery(); renderWidgets(); renderDevice(); checkDrive(); setInterval(renderDevice, 1500);
+/* ---------- context-aware profiles: the pad follows the foreground app (rules live in the helper; matching and timing are in library.js) ---------- */
+const switcher = L.createSwitcher({ debounceMs: 600 });
+state.ctx = JSON.parse(JSON.stringify(L.DEFAULT_CONTEXT)); let lastWin = null;
+function renderContext() {
+  const c = state.ctx; $('ctxOn').checked = c.enabled; $('ctxFallback').value = c.fallback; $('ctxRules').textContent = '';
+  for (const r of c.rules) {
+    const row = document.createElement('div'); row.className = 'row ctxrow'; row.style.margin = '3px 0';
+    const f = (cls, val, ph, w, type) => { const i = document.createElement('input'); i.type = type || 'text'; i.className = cls; i.value = val; i.placeholder = ph; i.title = ph; i.style.width = w; return i; };
+    row.append(f('cn', r.name, 'Name', '130px'), f('cp', r.process.join(', '), 'Program names, comma separated (empty = any)', '260px'), f('ct', r.titleContains, 'Window title contains (optional)', '170px'), f('cq', r.profile, 'Profile number', '64px', 'number'));
+    $('ctxRules').append(row);
+  }
+}
+function readContextEditor() {
+  return { enabled: $('ctxOn').checked, fallback: +$('ctxFallback').value, rules: [...document.querySelectorAll('#ctxRules .ctxrow')].map((row) => ({
+    name: row.querySelector('.cn').value, process: row.querySelector('.cp').value.split(',').map((x) => x.trim()).filter(Boolean), titleContains: row.querySelector('.ct').value, profile: +row.querySelector('.cq').value })) };
+}
+async function loadContext() { try { state.ctx = L.normalizeContext(await (await api('/api/context')).json()); } catch (e) { log('could not load the context rules: ' + e.message, 'bad'); } renderContext(); }
+async function saveContext() {
+  try {
+    const cfg = L.normalizeContext(readContextEditor());
+    state.ctx = L.normalizeContext(await (await api('/api/context', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) })).json());
+    log('context rules saved', 'good');
+  } catch (e) { log('could not save the context rules: ' + e.message, 'bad'); }
+  renderContext();
+}
+async function ctxTick(now = Date.now()) {
+  const st = $('ctxStatus'), c = state.ctx;
+  try {
+    if (!c.enabled) { st.textContent = 'Off'; return; }
+    if (!state.t) { st.textContent = 'Off: connect the pad first (Connect pad at the top)'; return; }
+    let w; try { w = await (await api('/api/window')).json(); } catch (e) { st.textContent = 'Off: the helper is not running'; return; }
+    if (!w.ok) { st.textContent = 'Off: the helper cannot read the foreground window'; return; }
+    lastWin = w;
+    const m = L.matchContext(c, w), p = switcher.update(w, now, { rules: c.rules, fallback: c.fallback, profiles: state.profiles });
+    const name = m && (m.rule ? m.rule.name : 'any other window');
+    if (p) { try { await send(C.F.gotoProfile(p)); } catch (e) { switcher.unsend(); throw e; } log(`switched the pad to profile ${p} (${name})`, 'good'); }
+    const s = switcher.status();
+    st.textContent = `On: ${w.process} | ${w.title || '(no title)'} → ${m ? name + ', profile ' + m.profile : 'no usable window'}` + (s.lastSent ? ` · pad on ${s.lastSent}` : '') + (s.held ? ' · paused (you changed profile on the pad)' : '') + (s.skipped ? ' · ' + s.skipped : '');
+  } catch (e) { st.textContent = 'Error: ' + e.message; log('context switching: ' + e.message, 'bad'); }
+}
+$('ctxOn').onchange = saveContext; $('btnCtxSave').onclick = saveContext;
+$('btnCtxDefaults').onclick = () => { state.ctx = { ...JSON.parse(JSON.stringify(L.DEFAULT_CONTEXT)), enabled: $('ctxOn').checked }; renderContext(); };
+$('btnCtxTest').onclick = async () => {
+  const p = +$('ctxTestProfile').value;
+  try { if (!state.t) throw new Error('connect the pad first'); await send(C.F.gotoProfile(p)); log(`test: asked the pad to go to profile ${p}`, 'good'); } catch (e) { log('test failed: ' + e.message, 'bad'); }
+};
+const ctxTimer = setInterval(() => ctxTick(), 1000);
+
+loadContext(); renderPalette(); buildTabs(); renderKeys(); renderGallery(); renderWidgets(); renderDevice(); checkDrive(); setInterval(renderDevice, 1500);
 log('Ready. Keys: click a key, then pick a preset. Screen: pick a widget. Close the official app before clicking Connect pad.');
 </script>
 </body>

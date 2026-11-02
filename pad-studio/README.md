@@ -36,12 +36,20 @@ The official app's file format was learned by creating every action in it and re
 | HID Mode checkbox | Yes. |
 | Device list; Set RGB backlight; Sync configuration; Switch theme; Upgrade firmware | **Device** tab. *Sync configuration* in the official app copies the pad's config to the PC so non-HID keys work; here "Sync" reloads every profile from the pad. Firmware upgrade over Wi-Fi is untested (the pad needs **2.4 GHz** Wi-Fi). |
 | Settings: language, time zone, Wi-Fi, auto-start, named pipe, toolbar | Only Wi-Fi for firmware. Not available: language (official has English / 中文 / 日本語), time zone, auto-start, named-pipe service. |
-| **Dynamic Profile Switch** | NOT available. The official rules are keywords matched against the *active window title* (per profile, plus a fallback profile). The command that makes the pad change profile is unknown. |
+| **Dynamic Profile Switch** | **Context-aware profiles** (Device tab): the pad changes profile to match the window in front. It sends the change-profile frame found in the official app; **not yet confirmed on the pad**. See the section below. |
 | Clear pairing information | NOT available (2.4G dongle only; command unknown). |
 | Running non-HID keys on the PC (launching apps, absolute mouse moves, shell commands…) | Only **Launch App** can start programs, and only with `node server.js --run-actions`. Mouse Move/Shell and the other PC-side actions are saved in the official format but not executed by Pad Studio. |
 | Double-click the scroll wheel: toggles the pad's USB drive | Pad hardware feature. Pad Studio's saving needs the drive on. |
 | PC-status screen | **PC monitor (built-in screen)** widget (`pcs` frames, unverified on the pad). |
 | Official web site / presets gallery links | Yes (Device tab). |
+
+## Context-aware profiles
+The pad follows the window in front, like the official app's Dynamic Profile Switch. **Device tab -> Context-aware profiles**: tick the box, connect the pad (the page must stay open and connected), and edit the rules (program names, optional title keyword, profile number; first match wins; everything else uses the fallback profile).
+- The helper (`node server.js`, Windows) reports the foreground program and title at `/api/window`; the rules are saved beside `server.js` in `context-rules.json` (`/api/context`).
+- The switch frame is `ebf` + length + `9<profile>.0` (profile 4 = `65 62 66 04 39 34 2e 30`), read from the official app's code (`Device.SetActiveProfileId`). Unit-tested byte for byte; **whether this pad obeys it has not been checked yet**. The **Test: go to profile** button in the panel sends it by hand. The official app also sends a `g<time>` handshake when it connects; if the pad ignores the switch, that is the first thing to copy.
+- Switching waits 600 ms on a stable window, never repeats a profile, never goes to a profile above the pad's count (add profiles with + on the Keys tab), and pauses when you press a key on the pad that reports a different profile than the one it sent, until you move to another program (a new title in the same program does not end the pause). Lock screens and "no window" never switch anything. If a switch fails to send, it is retried.
+- The defaults (profile 1 for anything else; Claude Code 6, VS Code 7, Visual Studio 8, Edge 9, Steam 10, Spotify 11, Claude Desktop 12, Terminal 13) only work once the pad has that many profiles. Claude Code is told apart from a plain terminal by "claude" or a ✳ star in the terminal's window title (use `|` in the title box for alternatives); VS Code's title never shows Claude Code, so VS Code always uses the VS Code profile. Check this against your real window titles.
+- The Profile tabs on the Keys tab only choose which profile you are editing; they do not switch the pad.
 
 ## AI agents
 The pad types into whatever window has focus, so it can drive Claude Code, ChatGPT, Cursor or any terminal agent.
