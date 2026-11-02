@@ -9,7 +9,7 @@ node server.js --read-only  # never write to the pad drive
 node test.js                # offline tests
 ```
 Open http://127.0.0.1:8777 in **Chrome or Edge** (not an embedded browser: WebSerial needs the real picker).
-Click **Connect pad** and pick *USB Serial Device*. Close the official config app first; only one program can hold the port.
+Click **Connect pad** and pick *USB Serial Device*. After that the page reconnects by itself when you refresh it or replug the pad (no popup); it stays off after you click **Disconnect** until you click Connect pad again, and it says in the log if the port is busy (close the official app). Close the official config app first; only one program can hold the port.
 
 ## What it does
 - **Keys:** click a key, click a preset (about 40, with emoji icons that are generated and saved), or fill all 8 from a layout. Save writes the pad's drive.
@@ -17,6 +17,9 @@ Click **Connect pad** and pick *USB Serial Device*. Close the official config ap
   Fast animations are under "Experimental" because the LCD cannot keep up.
 - **Key presses:** the pad reports each press; the tile flashes and the key's action can pop up on the LCD.
 - **Sports:** ESPN's unofficial public scoreboard (personal use; it may change without notice). All 359 leagues in 16 sports (`leagues.js`, found by a discovery sweep on 2026-10-31). Games are drawn in the teams' own colours; MMA bouts, tennis matches, golf leaderboards and racing weekends have their own layouts. Rotate / list / follow one team, with a SCORE! alert.
+- **Score bug + ticker (default mode):** fills the whole 480x200 drawable area (the bottom 120 px of the LCD belong to the key captions): league and status on top, a big score bar in the teams' colours with records, and a ticker of every other game along the bottom. The big bar follows *My team* if you set one, otherwise the first live game, otherwise the next game to start. The ticker uses the pad's own `long_mode: SCROLL_CIRCULAR`, so nothing streams; it shows `LIVE` / `FINAL` / start time, never a clock, so it only restarts when a score changes. **Not yet seen on the real LCD:** whether the pad scrolls it, and how the blank-line vertical centring looks (the font cannot be resized).
+- **Ticker leagues, emoji and primetime:** tap the sport chips (🏈 NFL, 🏀 NBA, ⚾ MLB, 🏒 NHL, ⚽ Premier League, 🥊 UFC…) to scroll those leagues too. The ticker shows live primetime games first (🌙 MNF / TNF / SNF for NFL games starting 7 pm or later in this computer's time zone, PRIMETIME for other NFL evenings and for evening games on a national network), then live games, then upcoming primetime, the rest, and finals last. A live primetime game of any chosen league also takes the big bar (your *My team* still wins). The *Emoji on the pad* switch turns the emoji into plain text (NFL, MNF); **whether the LCD font can draw emoji is not verified**, so if you see empty boxes, switch it to plain text. The web page itself uses emoji in the tabs, league list and connection light.
+- **League picker:** type in the search box above the list (`nfl`, `premier`, `soccer prem`, `ufc`); matches show as a list, and leagues you started appear under *Recent*.
 - **Logos:** the LCD canvas (`cus` protocol) cannot draw images. ESPN logos are fetched as 64x64 PNGs and written as the pad's *key icons* ("Put logos on keys" on the Sports widget). Whether the pad re-reads icons without a replug is not verified.
 
 ## Parity with the official EezBotFun config app (v1.8.0, checked by running it)

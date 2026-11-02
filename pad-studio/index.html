@@ -50,11 +50,11 @@
 <body>
 <header>
   <h1>Pad Studio</h1>
-  <nav class="row" style="margin:0"><button id="navKeys" class="on">Keys</button><button id="navScreen">Screen</button><button id="navExcel">Excel</button><button id="navDevice">Device</button></nav><button id="btnTheme" title="Switch light / dark theme">◐</button>
+  <nav class="row" style="margin:0"><button id="navKeys" class="on">⌨️ Keys</button><button id="navScreen">🖥️ Screen</button><button id="navExcel">📊 Excel</button><button id="navDevice">🔌 Device</button></nav><button id="btnTheme" title="Switch light / dark theme">◐</button>
   <span class="spacer"></span>
   <button id="btnSerial" class="primary">Connect pad</button>
   <button id="btnDisc" hidden>Disconnect</button>
-  <span class="pill" id="pConn">screen not connected</span>
+  <span class="pill" id="pConn">🔴 screen not connected</span>
   <span class="pill" id="pDrive">pad drive: checking…</span>
 </header>
 
@@ -204,23 +204,37 @@ function handleLine(raw) {
   if (text.startsWith('n=')) { state.profiles = Math.max(1, +text.slice(2) || 5); buildTabs(); }
   else if (text.startsWith('v=')) { state.fw = text.slice(2); log('pad firmware ' + state.fw, 'good'); renderDevice(); } else if (!/^[abc]=/.test(text)) log('pad: ' + text);
 }
-async function useTransport(t, label) { await closeTransport(); state.t = t; switcher.reset(); $('pConn').textContent = label; $('pConn').className = 'pill ok'; $('btnDisc').hidden = false; $('btnSerial').hidden = true; await t.write(C.F.queryVersion()); await t.write(C.F.queryProfiles()); }
-async function closeTransport() { stopRun(); if (state.t && state.t.close) await state.t.close().catch(() => {}); state.t = null; $('pConn').textContent = 'screen not connected'; $('pConn').className = 'pill'; $('btnDisc').hidden = true; $('btnSerial').hidden = false; }
-$('btnSerial').onclick = async () => {
-  if (!navigator.serial) return alert('The screen needs Chrome or Edge (WebSerial).');
-  try {
-    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] }); await port.open({ baudRate: 115200 });
+async function useTransport(t, label) { await closeTransport(); state.t = t; switcher.reset(); $('pConn').textContent = '🟢 ' + label; $('pConn').className = 'pill ok'; $('btnDisc').hidden = false; $('btnSerial').hidden = true; await t.write(C.F.queryVersion()); await t.write(C.F.queryProfiles()); }
+async function closeTransport() { stopRun(); if (state.t && state.t.close) await state.t.close().catch(() => {}); state.t = null; $('pConn').textContent = '🔴 screen not connected'; $('pConn').className = 'pill'; $('btnDisc').hidden = true; $('btnSerial').hidden = false; }
+function setAutoConnect(on) { try { localStorage.setItem('padAutoConnect', on ? '1' : '0'); } catch (e) { /* private window: no memory */ } }
+async function openSerialPort(port) {
+    await port.open({ baudRate: 115200 });
     let open = true; const reader = port.readable.getReader();
     (async () => { try { while (open) { const { value, done } = await reader.read(); if (done) break; if (value) onRx(value); } } catch (e) { log('read ended: ' + e.message); } if (open) { open = false; log('the pad was disconnected', 'bad'); closeTransport(); } })();
     await useTransport({ kind: 'serial',
       async write(bytes) { sim.feed(bytes); const w = port.writable.getWriter(); try { await w.write(bytes); } finally { w.releaseLock(); } },
       async close() { open = false; try { await reader.cancel(); } catch (e) {} try { reader.releaseLock(); } catch (e) {} try { await port.close(); } catch (e) {} } }, 'screen connected');
+    setAutoConnect(true);
+}
+$('btnSerial').onclick = async () => {
+  if (!navigator.serial) return alert('The screen needs Chrome or Edge (WebSerial).');
+  try { await openSerialPort(await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] }));
   } catch (e) {
     if (e.name === 'NotFoundError') log('No port was chosen. In the popup pick "USB Serial Device (COM…)" and click Connect. If there is no popup or it is empty, this is not a full Chrome/Edge window.', 'bad');
     else log('connect failed: ' + e.message + ' — close the official config app first (only one program can hold the port).', 'bad');
   }
 };
-$('btnDisc').onclick = closeTransport;
+/** After a refresh or a replug, reopen the pad the browser already allowed (no popup). Stays off after you click Disconnect. */
+async function autoConnect() {
+  let off = false; try { off = localStorage.getItem('padAutoConnect') === '0'; } catch (e) { /* default: on */ }
+  if (!navigator.serial || state.t || off) return;
+  try {
+    const ports = (await navigator.serial.getPorts()).filter((q) => q.getInfo().usbVendorId === 0x303a); if (!ports.length) return;
+    await openSerialPort(ports[0]); log('reconnected to the pad automatically', 'good');
+  } catch (e) { log('auto-reconnect failed: ' + e.message + ' (click Connect pad; the official app must be closed)', 'bad'); }
+}
+if (navigator.serial) navigator.serial.addEventListener('connect', () => setTimeout(autoConnect, 600));
+$('btnDisc').onclick = async () => { setAutoConnect(false); await closeTransport(); };
 async function send(bytes) { if (state.t) await state.t.write(bytes); else sim.feed(bytes); }
 
 /* ---------- pad drive (helper server) ---------- */
@@ -230,7 +244,7 @@ async function checkDrive() {
   const d = state.drive;
   $('pDrive').textContent = !d ? 'keys: start node server.js' : !d.drive ? 'pad drive not found' : 'pad drive ' + d.drive + (d.writable ? '' : ' (read-only)');
   $('pDrive').className = 'pill ' + (d && d.drive ? (d.writable ? 'ok' : 'warn') : 'warn');
-  renderDevice(); if (d && d.drive) loadProfile(state.profile);
+  renderDevice(); if (d && d.drive) loadProfile(state.profile, true);
 }
 
 /* ---------- icons from emoji ---------- */
@@ -243,10 +257,11 @@ function makeIcon(emoji, color) {
 /* ---------- keys: draft model ---------- */
 const emptyKey = () => ({ alias: '', hid: false, actions: [], iconUrl: null, iconCanvas: null, dirty: false });
 const draft = () => state.drafts[state.profile] || (state.drafts[state.profile] = Array.from({ length: 8 }, emptyKey));
-async function loadProfile(p) {
-  const arr = Array.from({ length: 8 }, emptyKey); state.drafts[p] = arr;
+async function loadProfile(p, keepDirty) { // keepDirty: keep keys that have unsaved changes (used after a save); the Reload buttons replace everything
+  const old = state.drafts[p] || [], arr = Array.from({ length: 8 }, (_, i) => (keepDirty && old[i] && old[i].dirty ? old[i] : emptyKey())); state.drafts[p] = arr;
   if (state.drive && state.drive.drive) await Promise.all(arr.map(async (e, i) => {
-    try { const c = await (await api(`/api/key?p=${p}&k=${i + 1}`)).json(); Object.assign(e, { alias: c.alias, hid: c.hid, actions: c.actions }); e.iconUrl = `/api/icon?p=${p}&k=${i + 1}&_=${Date.now()}`; } catch (err) { /* leave empty */ }
+    if (e.dirty) return; // an unsaved key is never overwritten by what is on the pad
+    try { const c = await (await api(`/api/key?p=${p}&k=${i + 1}`)).json(); if (e.dirty) return; Object.assign(e, { alias: c.alias, hid: c.hid, actions: c.actions }); e.iconUrl = `/api/icon?p=${p}&k=${i + 1}&_=${Date.now()}`; } catch (err) { /* leave empty */ }
   }));
   if (state.profile === p) renderKeys();
 }
@@ -269,7 +284,7 @@ function renderKeys(skipEditor) {
 }
 function assign(id, value) {
   const r = L.applyPreset(id, value), e = draft()[state.key]; Object.assign(e, { alias: r.alias, hid: r.hid, actions: r.actions, iconCanvas: makeIcon(r.emoji, r.color), dirty: true });
-  if (state.key < 7) state.key++; renderKeys();
+  renderKeys();
 }
 // gallery
 let pending = null;
@@ -290,15 +305,18 @@ $('paramCancel').onclick = () => { pending = null; $('paramBox').hidden = true; 
 L.LAYOUTS.forEach((l) => { const o = document.createElement('option'); o.value = l.id; o.textContent = l.name; $('layoutSel').append(o); });
 $('btnLayout').onclick = () => applyLayout($('layoutSel').value);
 function applyLayout(id) { const l = L.LAYOUTS.find((x) => x.id === id), d = draft(); l.keys.forEach((id, i) => { const r = L.applyPreset(id); Object.assign(d[i], { alias: r.alias, hid: r.hid, actions: r.actions, iconCanvas: makeIcon(r.emoji, r.color), dirty: true }); }); renderKeys(); log(`layout "${l.name}" applied to profile ${state.profile} (not saved yet)`); }
-$('btnReload').onclick = () => loadProfile(state.profile);
+const unsavedIn = (p) => (state.drafts[p] || []).filter((e) => e.dirty).length;
+$('btnReload').onclick = () => { const n = unsavedIn(state.profile); if (n && !confirm(`Reload from the pad and lose ${n} unsaved key(s)?`)) return; loadProfile(state.profile); };
 let saveOnly = null; // null = every changed key (Save profile); a number = just that key (Save key)
 $('btnSaveKey').onclick = async () => { saveOnly = state.key; try { await $('btnSave').onclick(); } finally { saveOnly = null; } };
 $('btnSave').onclick = async () => {
-  const d = draft(); $('btnSave').disabled = true; let aliasSent = 0;
+  const d = draft(), todo = d.map((e, i) => i).filter((i) => d[i].dirty && (saveOnly === null || i === saveOnly));
+  if (!todo.length) { const others = d.map((e, i) => i + 1).filter((n) => d[n - 1].dirty); log(saveOnly !== null ? `Key ${saveOnly + 1} has no unsaved changes.` + (others.length ? ` Unsaved: key ${others.join(', ')} (select it, or use Save profile).` : '') : 'No unsaved keys.'); renderKeys(); return; }
+  $('btnSave').disabled = true; let aliasSent = 0; const saved = [];
   try {
     for (let i = 0; i < 8; i++) {
       const e = d[i]; if (!e.dirty || (saveOnly !== null && i !== saveOnly)) continue;
-      if (e.deleted && !e.actions.length && !e.alias && !e.iconCanvas) { for (const what of ['key', 'icon']) await api(`/api/${what}?p=${state.profile}&k=${i + 1}`, { method: 'DELETE' }); e.deleted = false; e.dirty = false; continue; }
+      if (e.deleted && !e.actions.length && !e.alias && !e.iconCanvas) { for (const what of ['key', 'icon']) await api(`/api/${what}?p=${state.profile}&k=${i + 1}`, { method: 'DELETE' }); e.deleted = false; e.dirty = false; saved.push(i + 1); continue; }
       e.deleted = false; // the key was refilled after being deleted: save it normally
       const lines = L.scriptFromConfig(e.actions); if (lines.length > 20) throw new Error(`key ${i + 1} would run ${lines.length} script lines on the pad (max 20)`);
       await api(`/api/key?p=${state.profile}&k=${i + 1}`, { method: 'PUT', body: JSON.stringify({ alias: e.alias, hid: e.hid, actions: e.actions, script: lines }) });
@@ -306,9 +324,9 @@ $('btnSave').onclick = async () => {
       else if (e.clearIcon) { await api(`/api/icon?p=${state.profile}&k=${i + 1}`, { method: 'DELETE' }); e.clearIcon = false; }
       // the LCD label is the pad's own stored alias, which a drive save doesn't set (it shows SCRIPT otherwise)
       if (state.t && state.t.kind === 'serial') { try { await state.t.write(C.F.alias(state.profile, i + 1, e.alias || null)); aliasSent++; } catch (err) { log(`alias for key ${i + 1} not sent: ${err.message}`, 'bad'); } }
-      e.dirty = false;
+      e.dirty = false; saved.push(i + 1);
     }
-    log(`profile ${state.profile} saved to the pad drive. If the pad doesn't show the change, unplug and replug it.` + (aliasSent ? ` Key titles sent over serial (${aliasSent}).` : state.t ? '' : ' To make the LCD show the titles instead of SCRIPT, click Connect pad and save again.'), 'good'); await checkDrive();
+    log(`profile ${state.profile}: key ${saved.join(', ')} saved to the pad drive. If the pad doesn't show the change, unplug and replug it.` + (aliasSent ? ` Key titles sent over serial (${aliasSent}).` : state.t ? '' : ' To make the LCD show the titles instead of SCRIPT, click Connect pad and save again.'), 'good'); await checkDrive();
   } catch (err) { log('save failed: ' + err.message, 'bad'); }
   renderKeys();
 };
@@ -403,7 +421,7 @@ function renderDevice() {
   r.children[2].textContent = state.fw || '–'; r.children[3].textContent = d && d.drive ? d.drive + (d.writable ? ' (read/write)' : ' (read-only)') : 'not found';
   $('runActs').disabled = !(d && d.runActions); $('runNote').textContent = d && d.runActions ? 'The helper was started with --run-actions, so this can work.' : 'Off. To allow it, restart the helper with:  node server.js --run-actions';
 }
-$('btnSync').onclick = async () => { for (let p = 1; p <= state.profiles; p++) await loadProfile(p); log(`reloaded all ${state.profiles} profiles from the pad`, 'good'); };
+$('btnSync').onclick = async () => { const n = Object.keys(state.drafts).reduce((a, q) => a + unsavedIn(q), 0); if (n && !confirm(`Reload every profile from the pad and lose ${n} unsaved key(s)?`)) return; for (let p = 1; p <= state.profiles; p++) await loadProfile(p); log(`reloaded all ${state.profiles} profiles from the pad`, 'good'); };
 $('btnBackup').onclick = async () => { try { const j = await (await api('/api/backup', { method: 'POST' })).json(); log('pad drive backed up to ' + j.dest, 'good'); } catch (e) { log('backup failed: ' + e.message + ' (is the helper running?)', 'bad'); } };
 $('btnFw').onclick = async () => {
   if (!state.t || state.t.kind !== 'serial') return alert('Click Connect pad first.');
@@ -435,6 +453,19 @@ function selectWidget(w) {
     const el = q.type === 'select' || q.type === 'league' ? document.createElement('select') : q.type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
     el.id = 'wp_' + q.id; if (q.type === 'league') fillLeagues(el); else if (q.type === 'select') q.options.forEach((o, i) => { const op = document.createElement('option'); op.value = o; op.textContent = q.labels ? q.labels[i] : o; el.append(op); }); else if (q.type !== 'textarea') el.type = q.type;
     el.value = q.def; box.append(el);
+    if (q.id === 'also') { // one tap per league: the hidden text box holds the comma list that readParams() reads
+      el.hidden = true; const row = document.createElement('div'); row.id = 'tickChips'; row.className = 'row'; row.style.flexWrap = 'wrap';
+      for (const [path, name] of L.TICKER_CHIPS) {
+        const b = document.createElement('button'); b.textContent = L.sportEmoji(path) + ' ' + name; b.dataset.path = path;
+        b.onclick = () => { const set = new Set(el.value.split(',').filter(Boolean)); if (!set.delete(path)) set.add(path); el.value = [...set].join(','); b.classList.toggle('on', set.has(path)); el.dispatchEvent(new Event('change', { bubbles: true })); };
+        row.append(b);
+      }
+      box.append(row);
+    }
+    if (q.type === 'league') { // type to filter 360 leagues; matches show as a list and the first one is picked
+      const si = document.createElement('input'); si.type = 'text'; si.id = 'wp_league_q'; si.placeholder = 'Search: nfl, premier league, ufc, f1, soccer…'; box.insertBefore(si, el);
+      si.oninput = () => { const before = el.value; fillLeagues(el, si.value); el.size = si.value.trim() ? 8 : 1; if (el.value !== before) el.dispatchEvent(new Event('change', { bubbles: true })); };
+    }
   }
   if (w.id === 'sports') {
     const lp = document.createElement('div'); lp.className = 'panel'; lp.style.marginTop = '10px';
@@ -444,11 +475,14 @@ function selectWidget(w) {
   const row = document.createElement('div'); row.className = 'row'; const go = document.createElement('button'); go.className = 'primary'; go.textContent = w.every ? 'Start on pad' : 'Send to pad'; go.onclick = () => startWidget(w); row.append(go); box.append(row);
   if (!state.t) { const n = document.createElement('div'); n.className = 'stats'; n.textContent = 'Not connected: you will only see the preview here. Click Connect pad to send it to the LCD.'; box.append(n); }
 }
-function fillLeagues(el) {
-  const grp = (label, items) => { const g = document.createElement('optgroup'); g.label = label; items.forEach(([v, n]) => { const o = document.createElement('option'); o.value = v; o.textContent = n; g.append(o); }); el.append(g); };
-  grp('Popular', L.LEAGUES.map((l) => [l.path, l.name]));
-  for (const [s, label, ls] of PadLeagues) grp(`${label} (${ls.length})`, ls.map(([l, n]) => [s + '/' + l, n]));
+function fillLeagues(el, query = '') {
+  const grp = (label, items) => { const g = document.createElement('optgroup'); g.label = label === 'Recent' ? '🕘 Recent' : label === 'Popular' ? '⭐ Popular' : L.sportEmoji(items[0][0]) + ' ' + label; items.forEach(([v, n]) => { const o = document.createElement('option'); o.value = v; o.textContent = L.sportEmoji(v) + ' ' + n; g.append(o); }); el.append(g); };
+  const keep = el.value; el.textContent = '';
+  for (const [label, items] of L.searchLeagues(query, L.LEAGUES.map((l) => [l.path, l.name]), PadLeagues, recentLeagues())) grp(label, items);
+  if ([...el.options].some((o) => o.value === keep)) el.value = keep;
 }
+function recentLeagues() { try { return JSON.parse(localStorage.getItem('padRecentLeagues') || '[]'); } catch (e) { return []; } }
+function rememberLeague(path) { try { localStorage.setItem('padRecentLeagues', JSON.stringify([path, ...recentLeagues().filter((x) => x !== path)].slice(0, 6))); } catch (e) { /* private window: no recents */ } }
 function leagueName(path) { for (const [s, , ls] of PadLeagues) for (const [l, n] of ls) if (s + '/' + l === path) return n; return path; }
 async function putLogos() {
   if (!state.drive || !state.drive.writable) return alert('Start the helper (node server.js) so the app can write icons to the pad.');
@@ -473,20 +507,33 @@ async function fetchSports(p) {
     run.sports = { league: lg, games }; log(`${lg.name}: ${games.length} games (${games.filter((g) => g.state === 'in').length} live)`);
   } catch (e) { log('scores fetch failed: ' + e.message, 'bad'); if (!run.sports || run.sports.league.path !== p.league) run.sports = { league: lg, games: [] }; }
 }
+async function fetchExtras(p) {
+  const want = String(p.also || '').split(',').map((x) => x.trim()).filter((x) => x && x !== p.league).slice(0, 6);
+  run.extra = run.extra || {}; for (const k of Object.keys(run.extra)) if (!want.includes(k)) delete run.extra[k];
+  await Promise.all(want.map(async (path) => {
+    const old = run.extra[path]; if (old && Date.now() - old.at < 20000) return;
+    const lg = L.LEAGUES.find((l) => l.path === path) || { path, name: leagueName(path) };
+    try {
+      const r = await fetch(L.scoreboardUrl(lg)); if (!r.ok) throw new Error('HTTP ' + r.status);
+      const order = { in: 0, pre: 1, post: 2 }, games = L.parseEvents(await r.json()).sort((a, b) => order[a.state] - order[b.state] || new Date(a.date) - new Date(b.date));
+      run.extra[path] = { league: lg, games, at: Date.now() };
+    } catch (e) { log(`${lg.name} scores failed: ${e.message}`, 'bad'); run.extra[path] = { league: lg, games: old ? old.games : [], at: Date.now() }; }
+  }));
+}
 async function tick() {
   const w = run.w; if (!w || run.busy) return; run.busy = true;
   try {
     if (w.needs === 'stats') { try { run.stats = await (await api('/api/stats')).json(); } catch (e) { run.stats = null; } }
-    if (w.needs === 'sports') await fetchSports(run.p);
+    if (w.needs === 'sports') { await fetchSports(run.p); await fetchExtras(run.p); }
     if (w.needs === 'lcd') { try { run.lcd = await (await api('/api/lcd')).json(); } catch (e) { run.lcd = null; } }
-    const panels = w.gen({ now: new Date(), p: run.p, state: run.state, stats: run.stats, sports: run.sports, lcd: run.lcd }), key = JSON.stringify(panels);
+    const panels = w.gen({ now: new Date(), p: run.p, state: run.state, stats: run.stats, sports: run.sports, lcd: run.lcd, extra: run.extra }), key = JSON.stringify(panels);
     if (key !== run.last) { run.last = key; run.lastFrames = w.raw === 'pcs' ? [C.pcsFrame(panels)] : C.animFrames(panels); for (const f of run.lastFrames) await send(f); run.sent++; run.lastBytes = key.length; }
     $('stats').textContent = `${w.name}: ${run.sent} screen update(s) sent` + (w.every ? ` · checks every ${w.every / 1000}s, sends only when the text changes` : ' · sent once, the pad keeps showing it');
   } catch (e) { log('widget stopped: ' + e.message, 'bad'); stopRun(); }
   run.busy = false;
 }
 function startWidget(w) {
-  stopRun(); run.w = w; run.p = readParams(w); run.state = w.id === 'pomodoro' ? { t0: Date.now() } : w.id === 'sports' ? { seen: {}, alert: null } : {}; run.last = ''; run.sent = 0; run.sportsAt = 0;
+  stopRun(); run.w = w; run.p = readParams(w); if (w.id === 'sports') rememberLeague(run.p.league); run.state = w.id === 'pomodoro' ? { t0: Date.now() } : w.id === 'sports' ? { seen: {}, alert: null } : {}; run.last = ''; run.sent = 0; run.sportsAt = 0; run.extra = {};
   if (!w.every) { tick().then(() => { run.w = null; }); return; }
   tick(); run.timer = setInterval(tick, w.every);
 }
@@ -576,7 +623,7 @@ $('btnCtxTest').onclick = async () => {
 };
 const ctxTimer = setInterval(() => ctxTick(), 1000);
 
-loadContext(); renderPalette(); buildTabs(); renderKeys(); renderGallery(); renderWidgets(); renderDevice(); checkDrive(); setInterval(renderDevice, 1500);
+loadContext(); renderPalette(); buildTabs(); renderKeys(); renderGallery(); renderWidgets(); renderDevice(); checkDrive(); setInterval(renderDevice, 1500); autoConnect();
 log('Ready. Keys: click a key, then pick a preset. Screen: pick a widget. Close the official app before clicking Connect pad.');
 </script>
 </body>

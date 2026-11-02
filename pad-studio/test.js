@@ -119,7 +119,7 @@ t('every widget produces small valid frames; sports modes + score alert work', (
     const panels = w.gen({ now, p, state, stats: { cpu: 42.2, mem: 71, memUsedGB: 11.4, memFreeGB: 4.6 }, sports });
     if (w.raw === 'pcs') { const f = C.pcsFrame(panels); assert.strictEqual(Buffer.from(f.slice(0, 3)).toString(), 'pcs'); assert.deepStrictEqual(JSON.parse(Buffer.from(f.slice(5)).toString()).memory, { used: 11.4, avail: 4.6, percent: 71 }); continue; }
     const frames = C.animFrames(panels);
-    assert.ok(panels.length >= 1 && panels.length <= 3, w.id); frames.forEach((f) => assert.ok(f.length < 600, w.id + ' ' + f.length)); const s = new C.Simulator(); frames.forEach((f) => s.feed(f)); assert.strictEqual(s.stats.errors, 0, w.id);
+    assert.ok(panels.length >= 1 && panels.length <= 8, w.id); frames.forEach((f) => assert.ok(f.length < 600, w.id + ' ' + f.length)); const s = new C.Simulator(); frames.forEach((f) => s.feed(f)); assert.strictEqual(s.stats.errors, 0, w.id);
   }
   const sp = Lb.WIDGETS.find((w) => w.id === 'sports'), st = { seen: {}, alert: null }, base = { now, state: st, sports: { league: Lb.LEAGUES[0], games } };
   assert.ok(sp.gen({ ...base, p: { mode: 'list', team: '', secs: 5 } })[0].text.includes('POR 8 - 7 UTAH'));
@@ -316,5 +316,121 @@ t('review fixes: idle/lock-screen windows are no window, a failed send is retrie
   for (const [t, title] of [[1000, 'b'], [2000, 'YouTube - Microsoft Edge'], [3000, 'c']]) assert.strictEqual(sw.update(edge(title), t, ctx), null);
   assert.strictEqual(sw.status().held, true, 'the same app with a new title keeps the pause');
   sw.update(vs, 4000, ctx); assert.strictEqual(sw.status().held, false, 'another app ends the pause'); assert.strictEqual(sw.update(vs, 4600, ctx), 7);
+});
+const PL = require('./leagues.js');
+const area = (p) => p.w * p.h, inter = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+t('searchLeagues: type to filter, recents first, nothing found is empty', () => {
+  const all = Lb.searchLeagues('', Lb.LEAGUES.map((l) => [l.path, l.name]), PL, []);
+  assert.strictEqual(all[0][0], 'Popular'); assert.strictEqual(all.length, 1 + PL.length);
+  const rec = Lb.searchLeagues('', Lb.LEAGUES.map((l) => [l.path, l.name]), PL, ['football/nfl', 'nope/missing']);
+  assert.strictEqual(rec[0][0], 'Recent'); assert.deepStrictEqual(rec[0][1], [['football/nfl', 'NFL']], 'unknown recents are dropped');
+  const prem = Lb.searchLeagues('prem', [], PL, []); assert.ok(prem.length > 0);
+  for (const [, items] of prem) for (const [path, name] of items) assert.ok((path + ' ' + name).toLowerCase().includes('prem'), path);
+  assert.ok(prem.some(([, items]) => items.some(([, n]) => /premier/i.test(n))));
+  const narrow = Lb.searchLeagues('soccer prem', [], PL, []), flat = (g) => g.reduce((n, [, i]) => n + i.length, 0);
+  assert.ok(flat(narrow) > 0 && flat(narrow) <= flat(prem), 'every word must match (sport name counts)');
+  assert.deepStrictEqual(Lb.searchLeagues('zzzzqq', [], PL, []), []);
+});
+t('parseEvents keeps each side\'s record when ESPN sends one', () => {
+  const j = { events: [{ id: '9', date: '2026-11-01T18:00Z', status: { type: { state: 'in', shortDetail: '2nd - 0:01' } }, competitions: [{ competitors: [
+    { homeAway: 'home', score: '21', records: [{ type: 'total', summary: '7-3' }], team: { abbreviation: 'HOU' } }, { homeAway: 'away', score: '10', records: [{ type: 'total', summary: '5-5-1' }], team: { abbreviation: 'TEN' } }] }] }] };
+  const g = Lb.parseEvents(j)[0]; assert.strictEqual(g.away.rec, '5-5-1'); assert.strictEqual(g.home.rec, '7-3');
+  assert.strictEqual(Lb.parseEvents(sample)[0].away.rec, '');
+});
+t('score bug fills the whole 480x200 canvas, shows the main game and keeps the clock out of the ticker', () => {
+  const games = Lb.parseEvents(sample), fin = { ...games[1], id: '3', state: 'post', detail: 'Final', away: { abbr: 'NYK', name: '', score: '88' }, home: { abbr: 'MIA', name: '', score: '90' } };
+  const bug = Lb.scoreBug(games[0], [games[1], fin], 'NBA');
+  assert.strictEqual(bug.reduce((n, p) => n + area(p), 0), 480 * 200, 'panels add up to the whole canvas');
+  for (const p of bug) assert.ok(p.x >= 0 && p.y >= 0 && p.x + p.w <= 480 && p.y + p.h <= 200 && p.text.length > 0, JSON.stringify(p));
+  for (let a = 0; a < bug.length; a++) for (let b = a + 1; b < bug.length; b++) assert.strictEqual(inter(bug[a], bug[b]), 0, 'no overlaps ' + a + ',' + b);
+  const txt = bug.map((p) => p.text).join(' | ');
+  for (const w of ['NBA', 'POR', '8', 'UTAH', '7', '6:42 - 1st']) assert.ok(txt.includes(w), w + ' in ' + txt);
+  const tick = bug[bug.length - 1]; assert.strictEqual(tick.long_mode, 'SCROLL_CIRCULAR');
+  for (const w of ['PHI', 'CHA', 'NYK 88', 'MIA 90', 'FINAL']) assert.ok(tick.text.includes(w), w + ' in ' + tick.text);
+  assert.ok(!tick.text.includes('POR'), 'the main game is not repeated in the ticker');
+  assert.ok(Lb.tickerText([games[0]]).includes('LIVE') && !Lb.tickerText([games[0]]).includes('6:42'), 'live games say LIVE, no clock, so the ticker is not restarted every refresh');
+  assert.ok(Lb.scoreBug(games[0], [], 'NBA').pop().text.length > 0, 'ticker is never empty');
+  const lots = Array.from({ length: 90 }, (_, k) => ({ ...fin, id: 'x' + k })); C.animFrames(Lb.scoreBug(games[0], lots, 'NBA')).forEach((f) => assert.ok(f.length < 2043 + 5));
+  const rec = Lb.scoreBug({ ...games[0], away: { ...games[0].away, rec: '5-5-1' } }, [], 'NBA'); assert.ok(rec.some((p) => p.text.includes('5-5-1')));
+});
+t('Live sports "bug" mode: followed team first, else the live game; other sports still work', () => {
+  const sp = Lb.WIDGETS.find((w) => w.id === 'sports'), now = new Date('2026-10-31T20:00:00');
+  assert.strictEqual(sp.params.find((q) => q.id === 'mode').def, 'bug');
+  const pre = Lb.parseEvents(sample)[1], live = Lb.parseEvents(sample)[0], post = { ...pre, id: '7', state: 'post', detail: 'Final', away: { abbr: 'BOS', name: '', score: '99' }, home: { abbr: 'LAL', name: '', score: '101' } };
+  const run = (games, team) => sp.gen({ now, state: { seen: {}, alert: null }, sports: { league: Lb.LEAGUES[0], games }, p: { mode: 'bug', team, secs: 5 } });
+  const mainText = (panels) => panels.slice(0, 6).map((p) => p.text).join(' | ');
+  assert.ok(mainText(run([post, pre, live], '')).includes('UTAH'), 'the live game beats an earlier final');
+  assert.ok(mainText(run([live, pre], 'cha')).includes('CHA'), 'my team beats the live game');
+  assert.ok(mainText(run([post, pre], '')).includes('CHA'), 'nothing live: the next game to start');
+  assert.strictEqual(run([live, pre], '').reduce((n, p) => n + area(p), 0), 480 * 200);
+  const board = { id: 'g', kind: 'board', title: 'Masters', rows: ['1 SCH -12'], state: 'in', detail: 'Round 3', date: '', away: { abbr: '', name: '', score: '' }, home: { abbr: '', name: '', score: '' } };
+  assert.ok(run([board], '')[0].text.includes('Masters'), 'leaderboards keep their own card');
+});
+t('simulator remembers scroll mode so the preview can clip the ticker', () => {
+  const sim = new C.Simulator(); sim.feed(C.cusFrame({ clear_canvas: true, x: 0, y: 168, w: 480, h: 32, text: 'A B C', long_mode: 'scroll_circular' }));
+  assert.strictEqual(sim.panels[0].longMode, 'SCROLL_CIRCULAR'); sim.feed(C.cusFrame({ text: 'plain' })); assert.strictEqual(sim.panels[1].longMode, '');
+});
+t('sportEmoji: one emoji per ESPN sport, from a league path or a sport slug, with a stadium for the unknown', () => {
+  const e = Lb.sportEmoji;
+  assert.deepStrictEqual(['football/nfl', 'basketball/nba', 'baseball/mlb', 'hockey/nhl', 'soccer/eng.1', 'mma/ufc', 'golf/pga', 'racing/f1', 'tennis/atp', 'rugby/180654'].map(e), ['🏈', '🏀', '⚾', '🏒', '⚽', '🥊', '⛳', '🏎️', '🎾', '🏉']);
+  assert.strictEqual(e('lacrosse'), '🥍'); assert.strictEqual(e('volleyball/mens-college-volleyball'), '🏐'); assert.strictEqual(e('water-polo/x'), '🤽');
+  assert.strictEqual(e('curling/olympics'), '🏟️'); assert.strictEqual(e(''), '🏟️'); assert.strictEqual(e(undefined), '🏟️');
+  for (const [sport] of PL) assert.notStrictEqual(e(sport), '🏟️', 'every sport in the league list has its own emoji: ' + sport);
+});
+const NY = 'America/New_York', mk = (id, state, a, as, h, hs, date, detail, nets) => ({ id, kind: 'game', sep: '@', state, detail: detail || '', date, nets: nets || [], away: { abbr: a, name: '', score: String(as), rec: '' }, home: { abbr: h, name: '', score: String(hs), rec: '' } });
+t('parseEvents keeps the national TV networks (primetime needs them)', () => {
+  const j = { events: [{ id: '5', date: '2026-11-04T00:30Z', status: { type: { state: 'pre', shortDetail: '7:30 PM' } }, competitions: [{ broadcasts: [{ market: 'national', names: ['ESPN', 'ABC'] }, { market: 'home', names: ['KSL'] }], competitors: [{ homeAway: 'home', score: '0', team: { abbreviation: 'UTA' } }, { homeAway: 'away', score: '0', team: { abbreviation: 'DEN' } }] }] }] };
+  assert.deepStrictEqual(Lb.parseEvents(j)[0].nets, ['ESPN', 'ABC']); assert.deepStrictEqual(Lb.parseEvents(sample)[0].nets, []);
+});
+t('primeTag: Monday/Thursday/Sunday night football and nationally televised evening games', () => {
+  const at = (date, path, nets) => Lb.primeTag({ kind: 'game', date, nets: nets || [] }, path, NY);
+  assert.strictEqual(at('2026-11-03T01:15Z', 'football/nfl'), 'MNF'); assert.strictEqual(at('2026-11-06T01:15Z', 'football/nfl'), 'TNF'); assert.strictEqual(at('2026-11-09T01:20Z', 'football/nfl'), 'SNF');
+  assert.strictEqual(at('2026-11-08T18:00Z', 'football/nfl'), '', 'Sunday 1 pm is not primetime'); assert.strictEqual(at('2026-11-02T23:59Z', 'football/nfl'), '', 'Monday 6:59 pm Eastern is not primetime yet');
+  assert.strictEqual(at('2026-11-03T00:00Z', 'football/nfl'), 'MNF', '7 pm sharp counts');
+  assert.strictEqual(at('2026-11-28T01:00Z', 'football/nfl'), 'PRIMETIME', 'Friday night NFL');
+  assert.strictEqual(at('2026-11-04T00:30Z', 'basketball/nba', ['ESPN']), 'PRIMETIME'); assert.strictEqual(at('2026-11-04T00:30Z', 'basketball/nba'), '', 'an ordinary local game');
+  assert.strictEqual(at('not a date', 'football/nfl'), ''); assert.strictEqual(Lb.primeTag({ kind: 'game' }, 'football/nfl', NY), '');
+});
+t('decorate adds the league, its emoji and the primetime tag without touching the original', () => {
+  const g = mk('1', 'in', 'KC', 3, 'BUF', 0, '2026-11-03T01:15Z'), d = Lb.decorate([g], 'football/nfl', 'National Football League', NY)[0];
+  assert.deepStrictEqual([d.lg.path, d.lg.short, d.lg.emoji, d.prime], ['football/nfl', 'NFL', '🏈', 'MNF']); assert.strictEqual(g.lg, undefined);
+  assert.strictEqual(Lb.decorate([g], 'soccer/zzz.9', 'Odd League', NY)[0].lg.short, 'ZZZ.9');
+});
+t('ticker: live primetime first, then live, primetime to come, the rest, finals last; emoji or plain text', () => {
+  const dec = (g, path) => Lb.decorate([g], path, 'x', NY)[0];
+  const A = dec(mk('a', 'in', 'KC', 14, 'BUF', 10, '2026-11-03T01:15Z'), 'football/nfl'), B = dec(mk('b', 'in', 'LAL', 50, 'BOS', 48, '2026-11-02T20:00Z'), 'basketball/nba'),
+    C = dec(mk('c', 'pre', 'DAL', 0, 'PHI', 0, '2026-11-10T01:15Z', '11/9 - 8:15 PM EST'), 'football/nfl'), D = dec(mk('d', 'pre', 'NYR', 0, 'BOS', 0, '2026-11-05T00:00Z', '11/4 - 7:00 PM EST'), 'hockey/nhl'),
+    E = dec(mk('e', 'post', 'MIA', 90, 'NYK', 88, '2026-11-01T20:00Z', 'Final'), 'basketball/nba');
+  const on = Lb.tickerText([E, D, C, B, A], { emoji: true }), pos = (txt, w) => txt.indexOf(w);
+  assert.ok(pos(on, 'KC 14') < pos(on, 'LAL 50') && pos(on, 'LAL 50') < pos(on, 'DAL') && pos(on, 'DAL') < pos(on, 'NYR') && pos(on, 'NYR') < pos(on, 'MIA 90'), on);
+  assert.ok(on.includes('🏈 🌙 MNF KC 14 BUF 10  LIVE'), on); assert.ok(!on.includes('🌙 MNF LAL'), 'only the primetime game carries the tag');
+  assert.ok(on.includes('🏀 LAL 50 BOS 48  LIVE') && on.includes('🏒 NYR @ BOS'), on);
+  const off = Lb.tickerText([E, D, C, B, A], { emoji: false });
+  assert.ok(!/\p{Extended_Pictographic}/u.test(off), 'no emoji when switched off'); assert.ok(off.includes('NFL MNF KC 14 BUF 10  LIVE') && off.includes('NBA LAL 50') && off.includes('NHL NYR @ BOS'), off);
+  const one = Lb.tickerText([A], { emoji: false }); assert.ok(one.startsWith('MNF KC 14'), 'a single league needs no league name: ' + one);
+  const lots = Array.from({ length: 90 }, (_, k) => dec(mk('z' + k, 'pre', 'AAA', 0, 'BBB', 0, '2026-11-03T01:15Z', '11/2 - 8:15 PM EST'), 'football/nfl'));
+  assert.ok(new TextEncoder().encode(Lb.tickerText(lots, { emoji: true })).length <= 1400, 'capped in bytes, not characters');
+  require('./core.js').animFrames(Lb.scoreBug(A, lots, 'NFL', { emoji: true })).forEach((f) => assert.ok(f.length < 2043 + 5, 'frame ' + f.length));
+});
+t('score bug labels the primetime game and its league', () => {
+  const A = Lb.decorate([mk('a', 'in', 'KC', 14, 'BUF', 10, '2026-11-03T01:15Z', '2nd - 0:01', ['ESPN'])], 'football/nfl', 'National Football League', NY)[0];
+  const on = Lb.scoreBug(A, [], 'x', { emoji: true }), off = Lb.scoreBug(A, [], 'x', { emoji: false });
+  assert.strictEqual(on[0].text, '🏈 NFL'); assert.strictEqual(off[0].text, 'NFL'); assert.ok(on[1].text.startsWith('MNF') && on[1].text.includes('ESPN') && on[1].text.includes('2nd - 0:01'), on[1].text);
+  assert.strictEqual(on.reduce((n, q) => n + area(q), 0), 480 * 200);
+});
+t('bug mode with extra leagues: primetime game of any league takes the big bar; emoji switch and chips', () => {
+  const sp = Lb.WIDGETS.find((w) => w.id === 'sports'), now = new Date('2026-11-02T20:00:00');
+  const nba = [mk('n1', 'in', 'LAL', 50, 'BOS', 48, '2026-11-02T23:00Z', '3rd - 4:00')], nfl = [mk('f1', 'in', 'KC', 14, 'BUF', 10, '2026-11-03T01:15Z', '2nd - 0:01')];
+  const extra = { 'football/nfl': { league: { path: 'football/nfl', name: 'NFL' }, games: nfl } }, base = { now, state: { seen: {}, alert: null }, sports: { league: { path: 'basketball/nba', name: 'NBA' }, games: nba }, extra };
+  const run = (p) => sp.gen({ ...base, p: { mode: 'bug', team: '', secs: 5, tz: NY, ...p } });
+  const main = (p) => run(p).slice(0, 6).map((q) => q.text).join(' | ');
+  assert.ok(main({}).includes('KC') && main({}).includes('MNF'), 'MNF beats the live NBA game: ' + main({}));
+  assert.ok(main({ team: 'lal' }).includes('LAL'), 'my team still wins');
+  const tick = (p) => run(p).pop().text;
+  assert.ok(tick({}).includes('🏀 LAL 50') && !tick({}).includes('KC'), tick({})); assert.ok(!/\p{Extended_Pictographic}/u.test(tick({ emoji: 'off' })));
+  assert.strictEqual(sp.params.find((q) => q.id === 'emoji').def, 'on'); assert.strictEqual(sp.params.find((q) => q.id === 'also').def, '');
+  assert.strictEqual(sp.gen({ ...base, extra: undefined, p: { mode: 'bug', team: '', secs: 5, tz: NY } }).length, 7, 'works with no extra leagues');
+  const ids = new Set(PL.flatMap(([sport, , ls]) => ls.map(([l]) => sport + '/' + l)));
+  for (const [path, label] of Lb.TICKER_CHIPS) assert.ok(ids.has(path) && label, 'chip league exists: ' + path);
 });
 console.log('\n' + n + ' test groups passed');

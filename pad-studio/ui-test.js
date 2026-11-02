@@ -19,7 +19,7 @@ let ok = 0, bad = 0; const check = (name, cond, extra) => { if (cond) { ok++; co
   await cmd('Runtime.enable'); await cmd('Page.enable'); await cmd('Page.navigate', { url: 'http://127.0.0.1:8777/' }); await sleep(2500);
 
   // never touch the pad: stub the helper-server calls and record them
-  await ev(`window.calls = []; api = async (p, o) => { calls.push([(o && o.method) || 'GET', p, o && typeof o.body === 'string' ? o.body : undefined]); return { json: async () => ({ drive: 'G:/', writable: true, runActions: false, exists: false, alias: '', hid: false, actions: [] }) }; }; window.confirm = () => true; window.alert = (m) => { window.lastAlert = m; }; 1`);
+  await ev(`window.calls = []; window.realLoadProfile = loadProfile; api = async (p, o) => { calls.push([(o && o.method) || 'GET', p, o && typeof o.body === 'string' ? o.body : undefined]); return { json: async () => ({ drive: 'G:/', writable: true, runActions: false, exists: false, alias: '', hid: false, actions: [] }) }; }; window.confirm = () => true; window.alert = (m) => { window.lastAlert = m; }; 1`);
 
   // --- action sequence editor
   await ev(`state.drive = { drive: 'G:/', writable: true }; state.profile = 3; state.key = 0; buildTabs(); renderKeys(); 1`);
@@ -69,6 +69,34 @@ let ok = 0, bad = 0; const check = (name, cond, extra) => { if (cond) { ok++; co
   await ev(`Object.assign(draft()[0], emptyKey(), { deleted: true, dirty: true }); window.calls.length = 0; $('btnSave').onclick()`); await sleep(500);
   const c2 = await ev(`calls`); check('Saving a deleted key sends DELETE for key and icon', c2.some((c) => c[0] === 'DELETE' && c[1].startsWith('/api/key')) && c2.some((c) => c[0] === 'DELETE' && c[1].startsWith('/api/icon')), c2.map((c) => c.join(' ')));
 
+  // --- assigning single keys (bug: a preset moved the selection on, Save key then wrote nothing, and the reload wiped the assignment)
+  await ev(`loadProfile = window.realLoadProfile; window.fakeDrive = {};
+    api = async (p, o) => { const m = (o && o.method) || 'GET', u = new URL(p, 'http://x'), k = u.searchParams.get('p') + '.' + u.searchParams.get('k'); calls.push([m, p]);
+      if (u.pathname === '/api/key' && m === 'PUT') { const b = JSON.parse(o.body); fakeDrive[k] = { exists: true, alias: b.alias, hid: b.hid, actions: b.actions }; return { json: async () => ({}) }; }
+      if (u.pathname === '/api/key' && m === 'GET') return { json: async () => fakeDrive[k] || { exists: false, alias: '', hid: false, actions: [] } };
+      return { json: async () => ({ drive: 'G:/', writable: true, runActions: false, exists: false, alias: '', hid: false, actions: [] }) }; };
+    window.confirm = () => true; state.drive = { drive: 'G:/', writable: true }; state.profile = 4; delete state.drafts[4]; buildTabs(); loadProfile(4).then(() => 1)`);
+  await sleep(300);
+  const keyBtn = (i) => `document.querySelectorAll('#keys .key')[${i}].click()`, preset = (i) => `document.querySelectorAll('#gallery .pre')[${i}].click()`, lastLog = () => ev(`document.querySelector('#log div:last-child').textContent`);
+  await ev(keyBtn(2)); await ev(preset(0));
+  check('a preset goes on the selected key and the selection stays there', (await ev(`state.key === 2 && draft()[2].alias === 'Copy' && draft()[2].dirty === true && draft()[3].dirty === false`)) === true, await ev(`[state.key, draft()[2].alias]`));
+  await ev(`window.calls.length = 0; $('btnSaveKey').click()`); await sleep(500);
+  const wrote = (await ev(`calls`)).filter((c) => c[0] === 'PUT' && c[1].startsWith('/api/key'));
+  check('Save key writes that key (profile 4, key 3) and nothing else', wrote.length === 1 && wrote[0][1] === '/api/key?p=4&k=3', wrote);
+  check('...and the assignment is still there after the reload that follows a save', (await ev(`draft()[2].alias === 'Copy' && draft()[2].dirty === false`)) === true, await ev(`draft()[2].alias`));
+  await ev(keyBtn(0)); await ev(preset(0)); await ev(keyBtn(1)); await ev(preset(1));
+  await ev(`window.calls.length = 0; $('btnSaveKey').click()`); await sleep(500);
+  const wrote2 = (await ev(`calls`)).filter((c) => c[0] === 'PUT' && c[1].startsWith('/api/key'));
+  check('saving one key writes only that key', wrote2.length === 1 && wrote2[0][1] === '/api/key?p=4&k=2', wrote2);
+  check('...and another key that is still unsaved keeps its new assignment', (await ev(`draft()[0].alias === 'Copy' && draft()[0].dirty === true && draft()[1].alias === 'Paste' && draft()[1].dirty === false`)) === true, await ev(`draft().map((e) => [e.alias, e.dirty])`));
+  await ev(keyBtn(4)); await ev(`window.calls.length = 0; $('btnSaveKey').click()`); await sleep(400);
+  check('Save key on a key with nothing to save writes nothing and does not claim it saved', (await ev(`calls`)).filter((c) => c[0] === 'PUT').length === 0 && /no unsaved/i.test(await lastLog()) && !/saved to the pad/i.test(await lastLog()), await lastLog());
+  await ev(`window.confirm = () => false; $('btnReload').click()`); await sleep(300);
+  check('Reload asks first when keys are unsaved, and declining keeps them', (await ev(`draft()[0].alias === 'Copy' && draft()[0].dirty === true`)) === true);
+  await ev(`window.confirm = () => true; $('btnReload').click()`); await sleep(400);
+  check('...and accepting reloads the pad\'s version', (await ev(`draft()[0].dirty === false && draft()[0].alias === ''`)) === true, await ev(`draft().map((e) => [e.alias, e.dirty])`));
+  await ev(`state.profile = 3; buildTabs(); 1`);
+
   // --- profiles, theme, device page, widgets
   await ev(`state.t = { kind: 'serial', write: async (b) => { window.lastWrite = Array.from(b); } }; changeProfiles(1)`); await sleep(200);
   check('"+" sends the profile count command and adds a tab', (await ev(`state.profiles`)) === 6 && String.fromCharCode(...(await ev(`lastWrite`)).slice(4)) === 'm6');
@@ -81,6 +109,24 @@ let ok = 0, bad = 0; const check = (name, cond, extra) => { if (cond) { ok++; co
   check('Device page shows drive and disables unavailable items', (await ev(`$('devRow').textContent`)).includes('G:/') && (await ev(`document.querySelectorAll('#pageDevice button[disabled]').length`)) >= 2 && (await ev(`$('runActs').disabled`)) === true);
   await ev(`showPage('screen'); document.getElementById('w_sports').click()`);
   check('Sports widget lists every league and offers logos on keys', (await ev(`document.querySelectorAll('#wp_league option').length`)) > 300 && (await ev(`!!document.getElementById('btnLogos')`)) === true, await ev(`document.querySelectorAll('#wp_league option').length`));
+  check('Live sports defaults to the score bug + ticker and has a league search box', (await ev(`$('wp_mode').value === 'bug' && !!$('wp_league_q')`)) === true);
+  await ev(`$('wp_league_q').value = 'prem'; $('wp_league_q').dispatchEvent(new Event('input', { bubbles: true })); 1`);
+  const hits = await ev(`[...document.querySelectorAll('#wp_league option')].map((o) => o.textContent)`);
+  check('typing narrows the league list to matches (Premier League)', hits.length > 0 && hits.length < 60 && hits.some((n) => /premier/i.test(n)) && (await ev(`$('wp_league').size`)) > 1, hits.length);
+  check('the first match is selected so Start uses it', (await ev(`document.querySelector('#wp_league option:checked') !== null && $('wp_league').value !== ''`)) === true);
+  await ev(`$('wp_league_q').value = ''; $('wp_league_q').dispatchEvent(new Event('input', { bubbles: true })); 1`);
+  check('clearing the search brings every league back', (await ev(`document.querySelectorAll('#wp_league option').length`)) > 300 && (await ev(`$('wp_league').size`)) === 1);
+  await ev(`rememberLeague('football/nfl'); fillLeagues($('wp_league'), ''); 1`);
+  check('a league you started shows first under Recent', (await ev(`document.querySelector('#wp_league optgroup').label`)).includes('Recent') && (await ev(`document.querySelector('#wp_league optgroup option').value`)) === 'football/nfl');
+  check('ticker has one emoji chip per league and a plain-text switch', (await ev(`document.querySelectorAll('#tickChips button').length === L.TICKER_CHIPS.length && $('wp_emoji').value === 'on' && $('wp_also').value === ''`)) === true);
+  check('chips show the sport emoji', (await ev(`document.querySelector('#tickChips button').textContent.startsWith('🏈')`)) === true);
+  await ev(`document.querySelectorAll('#tickChips button')[0].click(); document.querySelectorAll('#tickChips button')[1].click(); 1`);
+  check('tapping chips fills the ticker leagues and marks them on', (await ev(`$('wp_also').value === 'football/nfl,basketball/nba' && document.querySelectorAll('#tickChips button.on').length === 2`)) === true, await ev(`$('wp_also').value`));
+  await ev(`document.querySelectorAll('#tickChips button')[0].click(); 1`);
+  check('tapping a chip again removes that league', (await ev(`$('wp_also').value === 'basketball/nba'`)) === true);
+  const emo = await ev(`[$('navScreen').textContent, document.querySelector('#wp_league option').textContent, $('pConn').textContent]`);
+  const hasEmoji = (x) => /\p{Extended_Pictographic}|\p{Emoji_Presentation}/u.test(x);
+  check('web app shows emoji in the tabs, the league list and the connection pill', emo.every(hasEmoji), emo);
   await ev(`document.getElementById('w_pcmonitor').click(); 1`); check('PC monitor widget selectable', (await ev(`run.selected.id`)) === 'pcmonitor');
   await ev(`showPage('keys'); state.drive = { drive: 'G:/', writable: true }; Object.assign(curKey(), { actions: [] }); renderEditor(curKey()); ['Mouse Click', 'Media Control', 'Device Ctrl', 'Functional Key', 'Input Text', 'Mouse Move'].forEach((n) => [...document.querySelectorAll('#palette button')].find((b) => b.textContent.includes(n)).click()); 1`);
   const opts = await ev(`[...document.querySelectorAll('#seq .arow')].map((r) => [...r.querySelectorAll('select')].map((s) => s.options.length).join('/'))`);
@@ -120,6 +166,19 @@ let ok = 0, bad = 0; const check = (name, cond, extra) => { if (cond) { ok++; co
   check('test connection is up', (await ev(`state.t !== null`)) === true);
   await ev(`window.endRead()`); await sleep(400); await ev(`ctxTick(30000)`);
   check('unplugging the pad (read loop ends) disconnects and the panel says Off', (await ev(`state.t === null && $('ctxStatus').textContent.includes('connect the pad')`)) === true, await ev(`$('ctxStatus').textContent`));
+  // --- auto reconnect after a page refresh (WebSerial remembers a port the user already allowed)
+  await ev(`window.mkPort = (o = {}) => ({ getInfo: () => ({ usbVendorId: o.vid || 0x303a }), open: async () => { if (o.failOpen) throw new Error('Failed to open serial port'); }, close: async () => {}, readable: { getReader: () => ({ read: () => new Promise((res) => { window.endRead = () => res({ done: true }); }), cancel: async () => {}, releaseLock: () => {} }) }, writable: { getWriter: () => ({ write: async () => {}, releaseLock: () => {} }) } });
+    window.setPorts = (list) => Object.defineProperty(navigator, 'serial', { configurable: true, value: { getPorts: async () => list, requestPort: async () => list[0], addEventListener: () => {} } }); localStorage.removeItem('padAutoConnect'); state.t = null; setPorts([]); 1`);
+  await ev(`autoConnect()`); check('no remembered port: nothing happens and nothing breaks', (await ev(`state.t === null`)) === true);
+  await ev(`setPorts([mkPort({ vid: 0x1234 })])`); await ev(`autoConnect()`); check('a port that is not the pad is ignored', (await ev(`state.t === null`)) === true);
+  await ev(`setPorts([mkPort({ failOpen: true })])`); await ev(`autoConnect()`); check('a port that will not open (official app running) fails quietly, logged', (await ev(`state.t === null && [...document.querySelectorAll('#log div')].some((d) => d.textContent.includes('auto-reconnect failed'))`)) === true);
+  await ev(`setPorts([mkPort()])`); await ev(`autoConnect()`); await sleep(300); check('the pad is reopened without clicking Connect', (await ev(`state.t !== null && $('pConn').textContent.includes('connected')`)) === true);
+  await ev(`$('btnDisc').click()`); await sleep(300); await ev(`autoConnect()`);
+  check('after you click Disconnect it stays disconnected, even after a refresh', (await ev(`state.t === null && localStorage.getItem('padAutoConnect') === '0'`)) === true);
+  await ev(`$('btnSerial').click()`); await sleep(300);
+  check('clicking Connect turns auto-reconnect back on', (await ev(`state.t !== null && localStorage.getItem('padAutoConnect') === '1'`)) === true);
+  await ev(`window.endRead(); 1`); await sleep(300); await ev(`autoConnect()`); await sleep(300);
+  check('after the cable is replugged (read loop ended) it reconnects', (await ev(`state.t !== null`)) === true);
   await ev(`state.t = { kind: 'serial', write: async (b) => { window.writes.push(Array.from(b)); } }; $('ctxTestProfile').value = '3'; $('btnCtxTest').click()`); await sleep(200);
   check('test button sends the frame for the chosen profile', JSON.stringify((await sws()).slice(-1)[0]) === JSON.stringify([0x65, 0x62, 0x66, 4, 0x39, 0x33, 0x2e, 0x30]), await sws());
   check('no uncaught page exceptions during the whole run', errors.length === 0, errors);

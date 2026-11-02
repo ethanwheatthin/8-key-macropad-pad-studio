@@ -146,17 +146,19 @@
   const stOf = (o) => { const t = (o && o.status && o.status.type) || {}; return { state: t.state || 'pre', detail: t.shortDetail || t.detail || '' }; };
   const hexc = (c) => (c && /^[0-9a-f]{6}$/i.test(c) ? '#' + c : null);
   function sideOf(x) {
-    if (!x) return { abbr: '?', name: '', score: '' };
+    if (!x) return { abbr: '?', name: '', score: '', rec: '' };
     const t = x.team, a = x.athlete, name = (t && t.displayName) || (a && (a.displayName || a.fullName)) || '';
     const abbr = (t && (t.abbreviation || t.shortDisplayName)) || lastName((a && (a.shortName || a.displayName)) || name);
     let score = x.score == null ? (t ? '0' : '') : String(x.score);
     if (!t && !score && Array.isArray(x.linescores) && x.linescores.length && x.linescores[0].value !== undefined) score = x.linescores.map((l) => l.value).join(' ');
-    return { abbr, name, score, logo: t && t.logo, color: hexc(t && t.color), alt: hexc(t && t.alternateColor) };
+    const recs = x.records || [], rec = (recs.find((r) => r.type === 'total') || recs[0] || {}).summary || '';
+    return { abbr, name, score, rec, logo: t && t.logo, color: hexc(t && t.color), alt: hexc(t && t.alternateColor) };
   }
   function gameOf(c, id, sep, st, date) {
     const cs = c.competitors, ra = cs.find((x) => x.homeAway === 'away') || cs[0], rh = cs.find((x) => x.homeAway === 'home') || cs[1], A = sideOf(ra), H = sideOf(rh);
     if (!ra.team && !A.score) { A.score = ra.winner ? 'W' : ''; H.score = rh.winner ? 'W' : ''; } // MMA etc: mark the winner
-    return { id, kind: 'game', sep, away: A, home: H, state: st.state, detail: st.detail, date };
+    const nat = (c.broadcasts || []).filter((b) => b.market === 'national').flatMap((b) => b.names || []).concat((c.geoBroadcasts || []).filter((b) => b.market && /national/i.test(b.market.type || '')).map((b) => b.media && b.media.shortName)).filter(Boolean);
+    return { id, kind: 'game', sep, away: A, home: H, state: st.state, detail: st.detail, date, nets: [...new Set(nat)] };
   }
   function parseEvents(json) {
     const out = [], head = (c) => c && (c.competitors || []).length === 2;
@@ -185,6 +187,65 @@
     const ab = g.away.color || '#2a3550', hb = (g.home.color && g.home.color !== ab ? g.home.color : g.home.alt) || '#503a2a';
     const half = (s, bg, x) => ({ x, y: 0, w: 240, h: 150, text: s.abbr + (g.state === 'pre' || s.score === '' ? '' : '\n' + s.score), bg, fg: textOn(bg), align: 'CENTER' });
     return [half(g.away, ab, 0), half(g.home, hb, 240), { x: 0, y: 150, w: 480, h: 50, text: g.detail || ' ', bg: tint(g.state), fg: '#FFFFFF', align: 'CENTER' }];
+  }
+  /** One emoji per ESPN sport slug; takes 'football/nfl' or 'football'. Browsers show them; whether the pad's LCD font has them is unverified. */
+  const SPORT_EMOJI = { football: '🏈', basketball: '🏀', baseball: '⚾', hockey: '🏒', soccer: '⚽', mma: '🥊', boxing: '🥊', golf: '⛳', tennis: '🎾', racing: '🏎️', rugby: '🏉', 'rugby-league': '🏉', 'australian-football': '🏉', cricket: '🏏', lacrosse: '🥍', volleyball: '🏐', 'field-hockey': '🏑', 'water-polo': '🤽' };
+  const sportEmoji = (path) => SPORT_EMOJI[String(path || '').split('/')[0]] || '🏟️';
+  /* ---------- score bug + ticker: fills the whole 480x200 canvas (the bottom 120 px of the LCD belong to the key captions) ---------- */
+  const shade = (hex, f) => '#' + [16, 8, 0].map((sh) => Math.round(((parseInt(hex.slice(1), 16) >> sh) & 255) * f).toString(16).padStart(2, '0')).join('');
+  const tickTag = (g) => g.state === 'in' ? 'LIVE' : g.state === 'post' ? (g.detail || 'FINAL').toUpperCase() : g.detail; // never the clock: a changing text would restart the pad's scroll every refresh
+  const clipBytes = (str, max) => { let out = '', n = 0; for (const ch of str) { n += new TextEncoder().encode(ch).length; if (n > max) break; out += ch; } return out; };
+  /** MNF / TNF / SNF for NFL games starting 7 pm or later (in tz, default this computer's), PRIMETIME for other NFL evenings and for evening games on a national network; '' otherwise. */
+  function primeTag(g, leaguePath, tz) {
+    const d = new Date(g && g.date); if (!g || !g.date || isNaN(d)) return '';
+    let parts; try { parts = new Intl.DateTimeFormat('en-US', { timeZone: tz || undefined, weekday: 'short', hour: 'numeric', hourCycle: 'h23' }).formatToParts(d); } catch (e) { return ''; }
+    const get = (t) => (parts.find((x) => x.type === t) || {}).value, hour = +get('hour'), day = get('weekday');
+    if (!(hour >= 19)) return '';
+    if (leaguePath === 'football/nfl') return day === 'Mon' ? 'MNF' : day === 'Thu' ? 'TNF' : day === 'Sun' ? 'SNF' : 'PRIMETIME';
+    return g.nets && g.nets.length ? 'PRIMETIME' : '';
+  }
+  /** Copies of the games tagged with their league ({path, name, short, emoji}) and primetime tag. */
+  function decorate(games, path, name, tz) {
+    const short = (LEAGUES.find((l) => l.path === path) || {}).name || (String(path).split('/')[1] || String(path)).toUpperCase();
+    const lg = { path, name: name || short, short, emoji: sportEmoji(path) };
+    return games.map((g) => ({ ...g, lg, prime: g.kind === 'game' ? primeTag(g, path, tz) : '' }));
+  }
+  const tickRank = (g) => g.state === 'in' ? (g.prime ? 0 : 1) : g.state === 'pre' ? (g.prime ? 2 : 3) : 4;
+  /** One line for the pad's own circular scroll: live primetime, live, primetime to come, the rest, finals last. No clocks. opts.emoji false = plain text. */
+  function tickerText(games, opts) {
+    const emoji = !opts || opts.emoji !== false, multi = new Set(games.map((g) => g.lg && g.lg.path)).size > 1;
+    const ordered = games.map((g, i) => [g, i]).sort((a, b) => tickRank(a[0]) - tickRank(b[0]) || a[1] - b[1]).map((x) => x[0]);
+    return clipBytes(ordered.map((g) => {
+      const lead = g.lg ? (emoji ? g.lg.emoji + ' ' : multi ? g.lg.short + ' ' : '') : '', tag = g.prime ? (emoji ? '🌙 ' : '') + g.prime + ' ' : '';
+      const body = g.kind === 'board' ? g.title : g.state === 'pre' ? `${g.away.abbr} @ ${g.home.abbr}  ${tickTag(g)}` : `${g.away.abbr} ${g.away.score} ${g.home.abbr} ${g.home.score}  ${tickTag(g)}`;
+      return lead + tag + body;
+    }).join('    |    '), 1400);
+  }
+  /** Top strip (league + status, with the MNF/primetime tag and network), big score bar (team colours, record, score), bottom ticker that the pad scrolls itself (long_mode). */
+  function scoreBug(g, others, leagueName, opts) {
+    const emoji = !opts || opts.emoji !== false, ab = g.away.color || '#2a3550', hb = (g.home.color && g.home.color !== ab ? g.home.color : g.home.alt) || '#503a2a';
+    const side = (s, bg, x) => [
+      { x, y: 30, w: 130, h: 138, text: '\n' + s.abbr + (s.rec ? '\n' + s.rec : ''), bg, fg: textOn(bg), align: 'CENTER' },
+      { x: x + 130, y: 30, w: 110, h: 138, text: '\n\n' + (g.state === 'pre' || s.score === '' ? '-' : s.score), bg: shade(bg, 0.72), fg: textOn(shade(bg, 0.72)), align: 'CENTER' }];
+    const label = g.lg ? (emoji ? g.lg.emoji + ' ' : '') + g.lg.short : String(leagueName || ' '), status = (g.prime ? g.prime + (g.nets && g.nets[0] ? ' · ' + g.nets[0] : '') + '   ' : '') + (g.detail || ' ');
+    return [
+      { x: 0, y: 0, w: 150, h: 30, text: Array.from(label).slice(0, 16).join(''), bg: '#c8102e', fg: '#FFFFFF', align: 'CENTER' },
+      { x: 150, y: 0, w: 330, h: 30, text: status, bg: tint(g.state), fg: '#FFFFFF', align: 'CENTER' },
+      ...side(g.away, ab, 0), ...side(g.home, hb, 240),
+      { x: 0, y: 168, w: 480, h: 32, text: tickerText(others, opts) || label + ' scoreboard', bg: '#0b1220', fg: '#FFFFFF', align: 'LEFT', long_mode: 'SCROLL_CIRCULAR' }];
+  }
+  /** Leagues offered as one-click chips for the ticker (all exist in leagues.js; a test checks). */
+  const TICKER_CHIPS = [['football/nfl', 'NFL'], ['basketball/nba', 'NBA'], ['baseball/mlb', 'MLB'], ['hockey/nhl', 'NHL'], ['soccer/eng.1', 'Premier League'], ['football/college-football', 'College football'], ['basketball/mens-college-basketball', 'College basketball'], ['mma/ufc', 'UFC'], ['basketball/wnba', 'WNBA'], ['soccer/usa.1', 'MLS'], ['golf/pga', 'PGA Tour'], ['racing/f1', 'Formula 1']];
+  /** League picker data: groups of [path, name] filtered by every word typed (sport name counts); recent leagues first. */
+  function searchLeagues(query, popular, groups, recent) {
+    const names = new Map();
+    for (const [sp, , ls] of groups) for (const [l, n] of ls) names.set(sp + '/' + l, n);
+    for (const [q, n] of popular) names.set(q, n); // the short popular name (NFL) wins
+    const terms = String(query || '').toLowerCase().split(/\s+/).filter(Boolean), hit = (label, path, name) => terms.every((t) => (label + ' ' + path + ' ' + name).toLowerCase().includes(t));
+    const out = [], rec = (recent || []).filter((q) => names.has(q)).map((q) => [q, names.get(q)]).filter(([q, n]) => hit('', q, n)), pop = popular.filter(([q, n]) => hit('', q, n));
+    if (rec.length) out.push(['Recent', rec]); if (pop.length) out.push(['Popular', pop]);
+    for (const [sp, label, ls] of groups) { const items = ls.filter(([l, n]) => hit(label, sp + '/' + l, n)).map(([l, n]) => [sp + '/' + l, n]); if (items.length) out.push([`${label} (${items.length})`, items]); }
+    return out;
   }
   /** ESPN serves team logos as 64x64 RGBA PNGs: the pad's key-icon format. The LCD canvas itself cannot show images. */
   const logoUrl = (logo) => { const m = /^https:\/\/a\.espncdn\.com(\/i\/teamlogos\/[A-Za-z0-9_\/.\-]+\.png)$/.exec(logo || ''); return m ? 'https://a.espncdn.com/combiner/i?img=' + m[1] + '&w=64&h=64' : null; };
@@ -221,9 +282,11 @@
       gen: ({ now, p }) => { const L = p.lines.split('\n').filter(Boolean); return card(L.length ? L[Math.floor(now / 1000 / Math.max(1, +p.secs)) % L.length] : '(no lines)', '#101820'); } },
     { id: 'sports', name: 'Live sports', emoji: '🏟️', every: 1000, needs: 'sports', stateful: true,
       params: [{ id: 'league', label: 'Sport & league (every ESPN league: soccer, football, basketball, MMA, golf, tennis, racing, rugby…)', type: 'league', def: 'basketball/nba' },
-        { id: 'mode', label: 'Show', type: 'select', def: 'rotate', options: ['rotate', 'list', 'team'], labels: ['One game at a time (rotating)', 'All games as a list', 'Only my team'] },
-        { id: 'team', label: 'My team abbreviation (for "my team" + score alerts)', type: 'text', def: '' }, { id: 'secs', label: 'Seconds per game (rotating)', type: 'number', def: 5 }],
-      gen: ({ now, p, state, sports }) => {
+        { id: 'mode', label: 'Show', type: 'select', def: 'bug', options: ['bug', 'rotate', 'list', 'team'], labels: ['Score bug + scrolling ticker (full screen)', 'One game at a time (rotating)', 'All games as a list', 'Only my team'] },
+        { id: 'team', label: 'My team abbreviation (for "my team" + score alerts)', type: 'text', def: '' }, { id: 'secs', label: 'Seconds per game (rotating)', type: 'number', def: 5 },
+        { id: 'also', label: 'Also scroll scores from these leagues (tap the sport chips)', type: 'text', def: '' },
+        { id: 'emoji', label: 'Sport emoji on the pad (the LCD font may not draw them)', type: 'select', def: 'on', options: ['on', 'off'], labels: ['Emoji on the ticker (🏈 🏀 ⚾ 🌙)', 'Plain text (NFL, NBA, MNF)'] }],
+      gen: ({ now, p, state, sports, extra }) => {
         if (!sports) return card('Loading scores…', '#10284a');
         const games = sports.games, mine = (p.team || '').trim().toUpperCase(), isMine = (g) => g.kind === 'game' && (g.away.abbr === mine || g.home.abbr === mine || (mine.length > 3 && (g.away.name + ' ' + g.home.name).toUpperCase().includes(mine)));
         if (mine) { // score-change alert for the followed team
@@ -231,6 +294,16 @@
           if (state.alert && now.getTime() < state.alert.until) return card('SCORE!\n' + gameLine(state.alert.g), '#7a5a00', { fg: '#FFFFFF' });
         }
         if (!games.length) return card('No games right now\n(' + sports.league.name + ')', '#222833');
+        if (p.mode === 'bug') { // my team's game, else live primetime (MNF...), else a live game (this league first), else the next game to start; everything else scrolls
+          const own = sports.league.path, tz = p.tz || undefined, pool = decorate(games, own, sports.league.name, tz);
+          for (const e of Object.values(extra || {})) if (e && e.league && e.league.path !== own) pool.push(...decorate(e.games, e.league.path, e.league.name, tz));
+          const gm = pool.filter((g) => g.kind === 'game');
+          if (gm.length) {
+            const rank = (g) => g.state === 'in' ? (g.prime ? 0 : g.lg.path === own ? 1 : 2) : g.state === 'pre' ? (g.prime ? 3 : 4) : 5;
+            const main = (mine && gm.find(isMine)) || gm.slice().sort((a, b) => rank(a) - rank(b) || String(a.date).localeCompare(String(b.date)))[0];
+            return scoreBug(main, pool.filter((g) => g !== main), main.lg.name, { emoji: p.emoji !== 'off' });
+          }
+        }
         if (p.mode === 'list') return card(games.slice(0, 7).map(gameLine).join('\n'), '#0f1a2a', { align: 'LEFT' });
         let g;
         if (p.mode === 'team' && mine) { g = games.find(isMine); if (!g) return card(mine + ': no game today\n(' + sports.league.name + ')', '#222833'); }
@@ -462,6 +535,6 @@
     };
   }
 
-  const api = { DEFAULT_CONTEXT, matchContext, parseWindowLine, normalizeContext, createSwitcher, PRESETS, LAYOUTS, applyPreset, byId, LEAGUES, scoreboardUrl, parseEvents, gameLine, gameCard, logoUrl, logoKeyPlan, WIDGETS, parseKeyEvent, keyToast, toastPanel, buildExcelPrompt, EXCEL_TIPS, ACTIONS, actionById, actionByCode, newAction, actionsToLines, scriptFromActions, scriptFromConfig, officialLines, linesToActions, MODS, FKEYS, MEDIA, DEVICE, CLICKS };
+  const api = { primeTag, decorate, TICKER_CHIPS, sportEmoji, searchLeagues, scoreBug, tickerText, DEFAULT_CONTEXT, matchContext, parseWindowLine, normalizeContext, createSwitcher, PRESETS, LAYOUTS, applyPreset, byId, LEAGUES, scoreboardUrl, parseEvents, gameLine, gameCard, logoUrl, logoKeyPlan, WIDGETS, parseKeyEvent, keyToast, toastPanel, buildExcelPrompt, EXCEL_TIPS, ACTIONS, actionById, actionByCode, newAction, actionsToLines, scriptFromActions, scriptFromConfig, officialLines, linesToActions, MODS, FKEYS, MEDIA, DEVICE, CLICKS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.PadLib = api;
 })(typeof window !== 'undefined' ? window : globalThis);

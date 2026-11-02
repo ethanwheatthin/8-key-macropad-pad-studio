@@ -129,7 +129,7 @@
         const w = clamp(o.w == null ? CUS_W : o.w | 0, 0, CUS_W - x), h = clamp(o.h == null ? CUS_H : o.h | 0, 0, CUS_H - y);
         const border = o.border === undefined ? 0 : o.border === true ? 1 : o.border === false ? 0 : Math.max(0, o.border | 0);
         this.panels.push({ x, y, w, h, text: o.text, fg: o.fg || '#FFFFFF', bg: o.bg || '#000000', align: (o.align || 'LEFT').toUpperCase(),
-          border, borderColor: o['border-color'] || '#888888', radius: o['border-radius'] | 0 });
+          border, borderColor: o['border-color'] || '#888888', radius: o['border-radius'] | 0, longMode: String(o.long_mode || '').toUpperCase() });
         if (this.panels.length > CUS_MAX_PANELS) this.panels.shift();
       }
       this.onChange(this);
@@ -145,7 +145,8 @@
           ctx.fillStyle = p.fg; ctx.font = '16px sans-serif'; ctx.textBaseline = 'top';
           ctx.textAlign = p.align === 'CENTER' ? 'center' : p.align === 'RIGHT' ? 'right' : 'left';
           const tx = p.align === 'CENTER' ? p.x + p.w / 2 : p.align === 'RIGHT' ? p.x + p.w - 6 : p.x + 6;
-          ctx.fillText(p.text, tx, p.y + 6, Math.max(1, p.w - 12));
+          if (/^SCROLL/.test(p.longMode)) { ctx.save(); ctx.beginPath(); ctx.rect(p.x, p.y, p.w, p.h); ctx.clip(); ctx.fillText(p.text, p.x + 6, p.y + 6); ctx.restore(); } // the pad scrolls this itself; the preview shows the start of the line
+          else p.text.split('\n').forEach((line, k) => ctx.fillText(line, tx, p.y + 6 + k * 20, Math.max(1, p.w - 12)));
         }
       }
     }
